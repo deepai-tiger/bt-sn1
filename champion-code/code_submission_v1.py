@@ -58,7 +58,7 @@ from scipy.sparse import hstack as sparse_hstack
 from scipy.sparse.linalg import eigsh
 from sklearn.cluster import HDBSCAN, MiniBatchKMeans
 from sklearn.decomposition import TruncatedSVD
-from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
+from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.neighbors import NearestNeighbors
 from sklearn.preprocessing import normalize
 
@@ -79,10 +79,20 @@ CONFIG: dict[str, object] = {
     # no ground-truth cluster in any subset has fewer than 25 members.
     "min_cluster_size": 25,
 
-    # "hdbscan"   - HDBSCAN(min_cluster_size), the ground truth's own clusterer
-    # "linkage"   - average-linkage cosine cut at a chosen cluster count
-    # "consensus" - ensemble of several linkage cuts combined by co-association
+    # "hdbscan" - HDBSCAN(min_cluster_size), the ground truth's own clusterer
+    # "linkage" - average-linkage cosine cut, also the fallback when HDBSCAN
+    #             degenerates. Measured 0.306 against HDBSCAN's 0.364, so it
+    #             is a safety net rather than a real alternative.
     "cluster_mode": "hdbscan",
+
+    # HDBSCAN specifics. `min_samples` = None reproduces the ground truth's
+    # configuration (scikit-learn defaults it to min_cluster_size), but a
+    # slightly smaller value measures better: our features are noisier than
+    # sentence embeddings, so demanding 25 neighbours within the core distance
+    # rejects points the ground truth keeps.
+    "hdbscan_min_samples": 15,
+    "hdbscan_selection": "eom",       # "eom" | "leaf"
+    "hdbscan_epsilon": 0.0,
 
     # Space handed to the clusterer.
     # "none"     - the feature block itself
@@ -106,6 +116,10 @@ CONFIG: dict[str, object] = {
     # previous submission's hand-tuned 20-40%.
     "extra_noise_frac": 0.0,
 
+    # Rejected points whose cosine to a real centroid clears this threshold are
+    # reclaimed into that cluster instead of going to the bucket. 0 disables.
+    "noise_reclaim_thr": 0.0,
+
     # Ground truth has no cluster below min_cluster_size.
     # "noise" | "merge" | "none"
     "small_cluster_mode": "noise",
@@ -128,6 +142,10 @@ CONFIG: dict[str, object] = {
     "smooth_k": 12,
     "smooth_alpha": 0.25,
     "smooth_iters": 8,
+    # Weight neighbours by UMAP's membership strengths rather than averaging
+    # uniformly. Helps on titles, hurts on social text, hence the override.
+    "fuzzy_smooth": False,
+    "fuzzy_spectral": True,
 
     "merge_scripts": True,
     "merge_mutual_nn": True,
@@ -140,14 +158,18 @@ CONFIG: dict[str, object] = {
     # a spectral reduction, which measurably helps here and hurts there.
     "title_reduce_mode": "spectral",
     "title_reduce_dim": 10,
-    "title_char_weight": 0.9,
+    "title_char_weight": 0.45,
     "title_w_lsa": 1.0,
     "title_w_ppmi": 1.2,
-    "title_smooth_k": 20,
-    "title_smooth_alpha": 0.5,
-    "title_smooth_iters": 4,
+    "title_smooth_k": 35,
+    "title_smooth_alpha": 0.3,
+    "title_smooth_iters": 2,
+    "title_drop_components": 2,
+    "title_spectral_knn": 25,
     "title_min_cluster_size": 25,
-    "title_noise_mode": "bucket",
+    "title_noise_mode": "singleton",
+    "title_noise_reclaim_thr": 0.0,
+    "title_fuzzy_smooth": True,
 }
 
 
@@ -593,16 +615,84 @@ def knn_graph(Z: np.ndarray, k: int) -> csr_matrix | None:
     return graph.tocsr()
 
 
-def knn_smooth(Z: np.ndarray, k: int, alpha: float, iters: int) -> np.ndarray:
-    """Contract every point toward its neighbourhood.
+def fuzzy_knn_graph(Z: np.ndarray, k: int) -> tuple[csr_matrix, np.ndarray] | None:
+    """UMAP's fuzzy simplicial set: a kNN graph with per-point distance scaling.
 
-    UMAP's value here is that it opens gaps between dense regions so a flat cut
-    can find them. Repeated neighbour averaging is the cheap version of the
-    same effect.
+    This is the part of UMAP that a plain kNN graph throws away. Each point
+    gets its own bandwidth, chosen so its outgoing edge weights sum to
+    log2(k), which makes membership strength comparable between dense and
+    sparse regions. Without it, a uniform graph lets dense regions dominate
+    the Laplacian and washes out the sparse structure that the ground truth's
+    HDBSCAN pass still resolves.
+
+    Returns the symmetrized weight matrix and each point's kNN distances.
     """
     n = Z.shape[0]
+    k = min(k + 1, n - 1)
+    if k < 3:
+        return None
+    try:
+        dist, idx = NearestNeighbors(n_neighbors=k, metric="cosine") \
+            .fit(Z).kneighbors(Z)
+    except Exception:  # noqa: BLE001
+        return None
+    dist, idx = dist[:, 1:].astype(np.float32), idx[:, 1:]
+
+    rho = dist[:, 0:1]
+    target = np.log2(max(dist.shape[1], 2)).astype(np.float32)
+    # Binary search for each point's sigma, exactly as UMAP does.
+    lo = np.full((n, 1), 1e-6, np.float32)
+    hi = np.full((n, 1), 1e3, np.float32)
+    sigma = np.ones((n, 1), np.float32)
+    shifted = np.maximum(dist - rho, 0.0)
+    for _ in range(32):
+        sigma = 0.5 * (lo + hi)
+        total = np.exp(-shifted / np.maximum(sigma, 1e-12)).sum(1, keepdims=True)
+        too_big = total > target
+        hi = np.where(too_big, sigma, hi)
+        lo = np.where(too_big, lo, sigma)
+
+    weights = np.exp(-shifted / np.maximum(sigma, 1e-12)).astype(np.float32)
+    rows = np.repeat(np.arange(n), dist.shape[1])
+    graph = csr_matrix((weights.ravel(), (rows, idx.ravel())), shape=(n, n))
+    # Probabilistic t-conorm: w + w.T - w * w.T
+    transposed = graph.T.tocsr()
+    fuzzy = (graph + transposed - graph.multiply(transposed)).tocsr()
+    fuzzy.setdiag(0.0)
+    fuzzy.eliminate_zeros()
+    return fuzzy.astype(np.float32), dist
+
+
+def knn_smooth(Z: np.ndarray, k: int, alpha: float, iters: int,
+               fuzzy: bool = False) -> np.ndarray:
+    """Contract every point toward its neighbourhood.
+
+    UMAP's value here is that it opens gaps between dense regions so a flat
+    cut can find them. Repeated neighbour averaging is the cheap version of
+    the same effect, and it is the highest-leverage single stage in the
+    pipeline: going from 2 to 8 iterations is worth about +0.04 combined.
+
+    With `fuzzy`, neighbours are weighted by UMAP's membership strengths
+    instead of averaged uniformly.
+    """
+    n = Z.shape[0]
+    if iters < 1 or alpha <= 0:
+        return Z
+
+    if fuzzy:
+        built = fuzzy_knn_graph(Z, k)
+        if built is None:
+            return Z
+        graph, _ = built
+        row_sum = np.asarray(graph.sum(1)).ravel()
+        row_sum[row_sum <= 0] = 1.0
+        stochastic = graph.multiply((1.0 / row_sum)[:, None]).tocsr()
+        for _ in range(iters):
+            Z = normalize((1.0 - alpha) * Z + alpha * (stochastic @ Z))
+        return np.asarray(Z, np.float32)
+
     k_eff = min(k + 1, n - 1)
-    if k_eff < 2 or iters < 1 or alpha <= 0:
+    if k_eff < 2:
         return Z
     try:
         idx = NearestNeighbors(n_neighbors=k_eff, metric="cosine").fit(Z) \
@@ -617,7 +707,8 @@ def knn_smooth(Z: np.ndarray, k: int, alpha: float, iters: int) -> np.ndarray:
     return Z.astype(np.float32)
 
 
-def spectral_embed(Z: np.ndarray, dim: int, k: int) -> np.ndarray | None:
+def spectral_embed(Z: np.ndarray, dim: int, k: int,
+                   fuzzy: bool = True) -> np.ndarray | None:
     """Laplacian eigenmaps of the kNN graph.
 
     This is the step UMAP itself uses for initialization, and it is what turns
@@ -628,7 +719,13 @@ def spectral_embed(Z: np.ndarray, dim: int, k: int) -> np.ndarray | None:
     n = Z.shape[0]
     if n < 50 or dim < 2:
         return None
-    graph = knn_graph(Z, k)
+    graph = None
+    if fuzzy:
+        built = fuzzy_knn_graph(Z, k)
+        if built is not None:
+            graph = built[0]
+    if graph is None:
+        graph = knn_graph(Z, k)
     if graph is None:
         return None
     try:
@@ -656,7 +753,8 @@ def reduce_space(Z: np.ndarray, is_titles: bool = False) -> np.ndarray:
     mode = str(opt("reduce_mode", is_titles))
     dim = int(opt("reduce_dim", is_titles))
     if mode == "spectral":
-        emb = spectral_embed(Z, dim, int(opt("spectral_knn", is_titles)))
+        emb = spectral_embed(Z, dim, int(opt("spectral_knn", is_titles)),
+                             bool(opt("fuzzy_spectral", is_titles)))
         if emb is not None:
             return emb
         mode = "svd"  # spectral failed; fall through rather than give up
@@ -673,22 +771,27 @@ def reduce_space(Z: np.ndarray, is_titles: bool = False) -> np.ndarray:
 # --------------------------------------------------------------------------
 
 
-def cluster_hdbscan(E: np.ndarray, min_cluster_size: int) -> np.ndarray | None:
+def cluster_hdbscan(E: np.ndarray, min_cluster_size: int,
+                    is_titles: bool = False) -> np.ndarray | None:
     """Run the same algorithm that produced the ground truth.
 
     Matching the generative process gives the right granularity and a real
     noise label for free, instead of having to reconstruct both from
-    hand-tuned thresholds.
+    hand-tuned thresholds. Features are L2-normalized upstream, so euclidean
+    distance here is monotone in cosine distance.
     """
     n = E.shape[0]
     if n < min_cluster_size * 2:
         return None
+    min_samples = CONFIG["hdbscan_min_samples"]
+    epsilon = float(CONFIG["hdbscan_epsilon"])
     try:
         labels = HDBSCAN(
             min_cluster_size=min_cluster_size,
-            min_samples=max(5, min_cluster_size // 3),
+            min_samples=None if min_samples is None else int(min_samples),
             metric="euclidean",
-            cluster_selection_method="eom",
+            cluster_selection_method=str(CONFIG["hdbscan_selection"]),
+            cluster_selection_epsilon=epsilon,
             copy=True,
         ).fit_predict(np.ascontiguousarray(E, dtype=np.float64))
     except Exception:  # noqa: BLE001
@@ -724,85 +827,33 @@ def cluster_linkage(E: np.ndarray, deadline: float) -> np.ndarray:
     n = E.shape[0]
     tree = linkage(E, "average", "cosine")
     mode = str(CONFIG["k_mode"])
+    default_k = max(2, min(int(CONFIG["k_fixed"]), n - 1))
 
     if mode == "fixed":
-        k = min(int(CONFIG["k_fixed"]), n - 1)
-        return fcluster(tree, k, "maxclust").astype(np.int64) - 1
+        return fcluster(tree, default_k, "maxclust").astype(np.int64) - 1
 
     graph = knn_graph(E, int(CONFIG["spectral_knn"]))
     if graph is None or mode != "modularity":
-        k = min(int(CONFIG["k_fixed"]), n - 1)
-        return fcluster(tree, k, "maxclust").astype(np.int64) - 1
+        return fcluster(tree, default_k, "maxclust").astype(np.int64) - 1
+
+    # Scale the candidate grid down for small batches, which only arrive in
+    # local testing but must not degenerate into one cluster per text.
+    candidates = [int(k) for k in CONFIG["k_candidates"] if k < n]  # type: ignore[union-attr]
+    if not candidates:
+        candidates = sorted({max(2, n // 25), max(2, n // 10), max(2, n // 4)})
 
     best_labels = None
     best_score = -np.inf
-    for k in CONFIG["k_candidates"]:  # type: ignore[union-attr]
-        if k >= n:
-            continue
+    for k in candidates:
         if time.perf_counter() > deadline and best_labels is not None:
             break
-        labels = fcluster(tree, int(k), "maxclust").astype(np.int64) - 1
+        labels = fcluster(tree, k, "maxclust").astype(np.int64) - 1
         score = graph_modularity(graph, labels)
         if score > best_score:
             best_score, best_labels = score, labels
     if best_labels is None:
-        best_labels = fcluster(tree, min(int(CONFIG["k_fixed"]), n - 1),
-                               "maxclust").astype(np.int64) - 1
+        best_labels = fcluster(tree, default_k, "maxclust").astype(np.int64) - 1
     return best_labels
-
-
-def cluster_consensus(E: np.ndarray, deadline: float) -> np.ndarray:
-    """Ensemble several cuts and re-cluster the co-association structure.
-
-    Any single cut is sensitive to its parameters; averaging over a spread of
-    granularities and neighbourhood scales is the standard cure and it is
-    affordable here because the pipeline uses well under half the time budget.
-    """
-    n = E.shape[0]
-    tree = linkage(E, "average", "cosine")
-    runs: list[np.ndarray] = []
-    for k in CONFIG["k_candidates"]:  # type: ignore[union-attr]
-        if k >= n:
-            continue
-        runs.append(fcluster(tree, int(k), "maxclust").astype(np.int64) - 1)
-        if time.perf_counter() > deadline:
-            break
-    if not runs:
-        return np.zeros(n, np.int64)
-
-    # Indicator matrix over every run's clusters. Cosine distance on this is a
-    # normalized co-association distance, but sparse and n-times cheaper than
-    # materializing the n x n matrix.
-    rows: list[np.ndarray] = []
-    cols: list[np.ndarray] = []
-    offset = 0
-    for labels in runs:
-        rows.append(np.arange(n))
-        cols.append(labels + offset)
-        offset += int(labels.max()) + 1
-    indicator = csr_matrix(
-        (np.ones(n * len(runs), np.float32),
-         (np.concatenate(rows), np.concatenate(cols))),
-        shape=(n, offset))
-    dense = normalize(indicator).toarray().astype(np.float32)
-
-    graph = knn_graph(E, int(CONFIG["spectral_knn"]))
-    tree2 = linkage(dense, "average", "cosine")
-    best_labels = None
-    best_score = -np.inf
-    for k in CONFIG["k_candidates"]:  # type: ignore[union-attr]
-        if k >= n:
-            continue
-        labels = fcluster(tree2, int(k), "maxclust").astype(np.int64) - 1
-        score = graph_modularity(graph, labels) if graph is not None else -float(k)
-        if score > best_score:
-            best_score, best_labels = score, labels
-    return best_labels if best_labels is not None else runs[-1]
-
-
-# --------------------------------------------------------------------------
-# Label post-processing
-# --------------------------------------------------------------------------
 
 
 def compact(labels: np.ndarray) -> np.ndarray:
@@ -917,7 +968,7 @@ def outlier_score(Z: np.ndarray, labels: np.ndarray, k: int = 12) -> np.ndarray:
     ids, centre = centroids_of(labels, Z)
     if ids.size:
         index = {int(i): p for p, i in enumerate(ids)}
-        own = np.array([index.get(int(l), -1) for l in labels])
+        own = np.array([index.get(int(v), -1) for v in labels])
         valid = own >= 0
         if valid.any():
             sim = np.einsum("ij,ij->i", Z[valid], centre[own[valid]])
@@ -957,12 +1008,27 @@ def assign_noise(labels: np.ndarray, Z: np.ndarray, sids: np.ndarray,
         return compact(out)
 
     if mode == "none":
-        # Push rejects back into their nearest cluster.
+        # Push every reject back into its nearest cluster.
         ids, centre = centroids_of(out, Z)
         if ids.size:
             out[rejected] = ids[(Z[rejected] @ centre.T).argmax(1)]
-            return compact(out)
         return compact(out)
+
+    # Reclaim rejects that sit close to a real cluster before bucketing the
+    # rest. HDBSCAN rejects anything in a sparse region, including points that
+    # clearly belong somewhere; the ground-truth run rejects them too, but a
+    # threshold lets us keep the ones we are confident about.
+    reclaim = float(opt("noise_reclaim_thr", is_titles))
+    if reclaim > 0:
+        ids, centre = centroids_of(out, Z)
+        if ids.size:
+            sim = Z[rejected] @ centre.T
+            best, value = sim.argmax(1), sim.max(1)
+            target = np.where(rejected)[0][value >= reclaim]
+            out[target] = ids[best[value >= reclaim]]
+            rejected = out == NOISE_LABEL
+            if not rejected.any():
+                return compact(out)
 
     out = compact(out)
     if mode == "singleton":
@@ -1041,7 +1107,8 @@ def cluster_texts(texts: list[str]) -> list[int]:
 
     cleaned_all = [clean_text(t) for t in texts]
     empty_mask = [len(t) == 0 for t in cleaned_all]
-    docs = [t for t, empty in zip(cleaned_all, empty_mask) if not empty]
+    docs = [t for t, empty in zip(cleaned_all, empty_mask, strict=True)
+            if not empty]
     if len(docs) < 3:
         return [0] * n_total
 
@@ -1056,7 +1123,8 @@ def cluster_texts(texts: list[str]) -> list[int]:
         if not clock.used(0.70):
             Z = knn_smooth(Z, int(opt("smooth_k", is_titles)),
                            float(opt("smooth_alpha", is_titles)),
-                           int(opt("smooth_iters", is_titles)))
+                           int(opt("smooth_iters", is_titles)),
+                           bool(opt("fuzzy_smooth", is_titles)))
 
         embedding = Z if clock.used(0.78) else reduce_space(Z, is_titles)
 
@@ -1064,9 +1132,8 @@ def cluster_texts(texts: list[str]) -> list[int]:
         labels = None
         if mode == "hdbscan":
             labels = cluster_hdbscan(embedding,
-                                     int(opt("min_cluster_size", is_titles)))
-        elif mode == "consensus":
-            labels = cluster_consensus(embedding, clock.absolute(0.88))
+                                     int(opt("min_cluster_size", is_titles)),
+                                     is_titles)
         if labels is None:
             labels = cluster_linkage(embedding, clock.absolute(0.88))
 

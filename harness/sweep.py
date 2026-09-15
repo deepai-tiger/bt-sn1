@@ -42,7 +42,6 @@ EXPERIMENTS: dict[str, dict[str, dict]] = {
         "hdbscan": {"cluster_mode": "hdbscan"},
         "linkage_modularity": {"cluster_mode": "linkage", "k_mode": "modularity"},
         "linkage_fixed45": {"cluster_mode": "linkage", "k_mode": "fixed", "k_fixed": 45},
-        "consensus": {"cluster_mode": "consensus"},
     },
     # Is a UMAP-like spectral space worth its cost?
     "reduce_mode": {
@@ -70,6 +69,31 @@ EXPERIMENTS: dict[str, dict[str, dict]] = {
         "35": {"title_min_cluster_size": 35},
     },
     # Ground truth has no cluster below 25 members.
+    "hdbscan_min_samples": {
+        "auto(=mcs)": {"hdbscan_min_samples": None},
+        "8": {"hdbscan_min_samples": 8},
+        "15": {"hdbscan_min_samples": 15},
+        "40": {"hdbscan_min_samples": 40},
+    },
+    "hdbscan_selection": {
+        "eom": {"hdbscan_selection": "eom"},
+        "leaf": {"hdbscan_selection": "leaf"},
+    },
+    "noise_reclaim": {
+        "0.0": {"noise_reclaim_thr": 0.0, "title_noise_reclaim_thr": 0.0},
+        "0.5": {"noise_reclaim_thr": 0.5, "title_noise_reclaim_thr": 0.5},
+        "0.7": {"noise_reclaim_thr": 0.7, "title_noise_reclaim_thr": 0.7},
+        "0.85": {"noise_reclaim_thr": 0.85, "title_noise_reclaim_thr": 0.85},
+    },
+    "fuzzy_spectral": {
+        "on": {"fuzzy_spectral": True},
+        "off": {"fuzzy_spectral": False},
+    },
+    "fuzzy_smooth": {
+        "social_off_titles_on": {"fuzzy_smooth": False, "title_fuzzy_smooth": True},
+        "both_off": {"fuzzy_smooth": False, "title_fuzzy_smooth": False},
+        "both_on": {"fuzzy_smooth": True, "title_fuzzy_smooth": True},
+    },
     "small_cluster_mode": {
         "noise": {"small_cluster_mode": "noise"},
         "merge": {"small_cluster_mode": "merge"},
@@ -89,10 +113,10 @@ EXPERIMENTS: dict[str, dict[str, dict]] = {
         "32": {"min_cluster_size": 32},
     },
     "smoothing": {
-        "2iter": {"smooth_iters": 2},
-        "4iter": {"smooth_iters": 4},
         "6iter": {"smooth_iters": 6},
         "8iter": {"smooth_iters": 8},
+        "12iter": {"smooth_iters": 12},
+        "18iter": {"smooth_iters": 18},
     },
     "smooth_alpha": {
         "0.15": {"smooth_alpha": 0.15},
@@ -114,8 +138,35 @@ EXPERIMENTS: dict[str, dict[str, dict]] = {
     },
     "title_features": {
         "balanced": {"title_w_lsa": 1.0, "title_w_ppmi": 1.2},
-        "lsa_heavy": {"title_w_lsa": 1.5, "title_w_ppmi": 1.0},
+        "lsa_heavy": {"title_w_lsa": 1.6, "title_w_ppmi": 0.9},
         "ppmi_heavy": {"title_w_lsa": 0.6, "title_w_ppmi": 1.5},
+        "lsa_only": {"title_w_lsa": 1.0, "title_w_ppmi": 0.0},
+    },
+    "title_smoothing": {
+        "2iter": {"title_smooth_iters": 2},
+        "4iter": {"title_smooth_iters": 4},
+        "8iter": {"title_smooth_iters": 8},
+        "14iter": {"title_smooth_iters": 14},
+    },
+    "title_smooth_alpha": {
+        "0.3": {"title_smooth_alpha": 0.3},
+        "0.5": {"title_smooth_alpha": 0.5},
+        "0.7": {"title_smooth_alpha": 0.7},
+    },
+    "title_smooth_k": {
+        "10": {"title_smooth_k": 10},
+        "20": {"title_smooth_k": 20},
+        "35": {"title_smooth_k": 35},
+    },
+    "title_char_weight": {
+        "0.45": {"title_char_weight": 0.45},
+        "0.9": {"title_char_weight": 0.9},
+        "1.5": {"title_char_weight": 1.5},
+    },
+    "title_drop_components": {
+        "0": {"title_drop_components": 0},
+        "1": {"title_drop_components": 1},
+        "2": {"title_drop_components": 2},
     },
     "char_weight": {
         "0.0": {"char_weight": 0.0},
