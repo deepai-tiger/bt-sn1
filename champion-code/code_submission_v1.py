@@ -1,0 +1,422 @@
+k=isinstance                                                                                                                                                                                            
+j=set                                                                                                                                                                                                   
+i=enumerate                                                                                                                                                                                             
+M=ord                                                                                                                                                                                                   
+c=list                                                                                                                                                                                                  
+I=ValueError                                                                                                                                                                                            
+R=Exception                                                                                                                                                                                             
+L=max                                                                                                                                                                                                   
+G=str                                                                                                                                                                                                   
+K=range                                                                                                                                                                                                 
+H=float                                                                                                                                                                                                 
+F=int                                                                                                                                                                                                   
+D=min                                                                                                                                                                                                   
+B=len                                                                                                                                                                                                   
+import argparse as AF,lzma as l,os,struct,re as E,time as P                                                                                                                                             
+for AG in('OPENBLAS_NUM_THREADS','OMP_NUM_THREADS','MKL_NUM_THREADS','NUMEXPR_NUM_THREADS','VECLIB_MAXIMUM_THREADS'):os.environ.setdefault(AG,'1')                                                      
+import numpy as A,uvicorn                                                                                                                                                                               
+from fastapi import FastAPI as m,HTTPException as AH                                                                                                                                                    
+from pydantic import BaseModel as n                                                                                                                                                                     
+from scipy.cluster.hierarchy import fcluster as o,linkage as p                                                                                                                                          
+from scipy.sparse import coo_matrix as u,csr_matrix as U,hstack as N                                                                                                                                    
+from scipy.sparse.linalg import eigsh                                                                                                                                                                   
+from sklearn.cluster import MiniBatchKMeans as x                                                                                                                                                        
+from sklearn.decomposition import TruncatedSVD as T                                                                                                                                                     
+from sklearn.feature_extraction.text import CountVectorizer as V,HashingVectorizer as O,TfidfVectorizer as g                                                                                            
+from sklearn.neighbors import NearestNeighbors as Q,kneighbors_graph                                                                                                                                    
+from sklearn.preprocessing import normalize as C                                                                                                                                                        
+import sklearn                                                                                                                                                                                          
+sklearn.set_config(working_memory=128)                                                                                                                                                                  
+AI=128                                                                                                                                                                                                  
+AJ=10                                                                                                                                                                                                   
+AK=3                                                                                                                                                                                                    
+AL=20000                                                                                                                                                                                                
+AM=192                                                                                                                                                                                                  
+W,X,J=8192,4096,48                                                                                                                                                                                      
+AN=.85                                                                                                                                                                                                  
+AO=.5                                                                                                                                                                                                   
+AP=130                                                                                                                                                                                                  
+AQ=12                                                                                                                                                                                                   
+AR=.2                                                                                                                                                                                                   
+AS=1                                                                                                                                                                                                    
+y=32                                                                                                                                                                                                    
+AT=28                                                                                                                                                                                                   
+AU=12                                                                                                                                                                                                   
+AV=.045                                                                                                                                                                                                 
+z=0                                                                                                                                                                                                     
+AW=.94                                                                                                                                                                                                  
+AX=.8                                                                                                                                                                                                   
+AY=.08                                                                                                                                                                                                  
+AZ=.03                                                                                                                                                                                                  
+v,Aa=40,300                                                                                                                                                                                             
+Ab=25                                                                                                                                                                                                   
+w=.001                                                                                                                                                                                                  
+Ac=1                                                                                                                                                                                                    
+A0=2                                                                                                                                                                                                    
+Ad=1                                                                                                                                                                                                    
+Ae=3                                                                                                                                                                                                    
+Af=1                                                                                                                                                                                                    
+b=.03                                                                                                                                                                                                   
+q,Ag=.25,.4                                                                                                                                                                                             
+Ah=.9                                                                                                                                                                                                   
+A1,Ai=.1,.32                                                                                                                                                                                            
+A2=6000                                                                                                                                                                                                 
+r=70                                                                                                                                                                                                    
+Aj=15000                                                                                                                                                                                                
+A3=12                                                                                                                                                                                                   
+Ak='AAA'
+S=None                                                                                                                                                                                                  
+Al=E.compile('http\\S+|www\\S+|https\\S+')                                                                                                                                                              
+Am=E.compile('@\\w+')                                                                                                                                                                                   
+An=E.compile('#(\\w+)')                                                                                                                                                                                 
+Ao=E.compile('[^\\w\\s]')                                                                                                                                                                               
+Ap=E.compile('\\s+')                                                                                                                                                                                    
+class Aq(n):texts:c[G]                                                                                                                                                                                  
+class Y(n):cluster_ids:c[F]                                                                                                                                                                             
+def Ar(text:G)->G:A=text;A=A.lower();A=Al.sub(' ',A);A=Am.sub(' ',A);A=An.sub('\\1',A);A=Ao.sub(' ',A);return Ap.sub(' ',A).strip()                                                                     
+As=(1024,1327,1),(19968,40959,2),(12352,12543,2),(44032,55215,2),(1536,1791,3),(1424,1535,4),(3584,3711,5),(2304,2431,6)                                                                                
+def A4(t):                                                                                                                                                                                              
+    D=B(t)or 1;C=[0]*7                                                                                                                                                                                  
+    for E in t:                                                                                                                                                                                         
+        F=M(E)                                                                                                                                                                                          
+        for(G,H,A)in As:                                                                                                                                                                                
+            if G<=F<=H:C[A]+=1;break                                                                                                                                                                    
+    A=L(K(1,7),key=lambda i:C[i]);return A if C[A]*8>=D else 0                                                                                                                                          
+def A5(lab,sid,lo=.05,hi=.4,pur=.55,ms=3):                                                                                                                                                              
+    C=lab;C=A.asarray(C,A.int64).copy()                                                                                                                                                                 
+    for E in K(1,7):                                                                                                                                                                                    
+        G=sid==E;I=H(G.mean())if C.size else .0                                                                                                                                                         
+        if I<lo or I>hi:continue                                                                                                                                                                        
+        D=[]                                                                                                                                                                                            
+        for J in A.unique(C[G]):                                                                                                                                                                        
+            L=C==J                                                                                                                                                                                      
+            if L.sum()>=ms and(sid[L]==E).mean()>=pur:D.append(F(J))                                                                                                                                    
+        if B(D)>=2:C[A.isin(C,D)]=D[0]                                                                                                                                                                  
+    return C                                                                                                                                                                                            
+def At(d,lab,Z,n,cap=3,lo=.012,hi=.12,ms=40):                                                                                                                                                           
+    C=[]                                                                                                                                                                                                
+    for G in A.unique(lab):                                                                                                                                                                             
+        B=lab==G;D=F(B.sum())                                                                                                                                                                           
+        if D<L(ms,F(lo*n))or D>F(hi*n):continue                                                                                                                                                         
+        E=Z[B].mean(0);E/=A.linalg.norm(E)+1e-12;C.append((D*H((Z[B]@E).mean()),B))                                                                                                                     
+    C.sort(key=lambda x:-x[0])                                                                                                                                                                          
+    for(I,B)in C[:cap]:d[B]=-1.                                                                                                                                                                         
+    return d                                                                                                                                                                                            
+def Au(docs,lab,thr=.7):                                                                                                                                                                                
+    D=lab;D=A.asarray(D,A.int64).copy();E=A.unique(D);L=[' '.join(A.asarray(docs)[D==B][:80])for B in E]                                                                                                
+    try:H=C(g(max_features=4000,stop_words='english',dtype=A.float32).fit_transform(L))                                                                                                                 
+    except I:return D                                                                                                                                                                                   
+    G=(H@H.T).toarray();A.fill_diagonal(G,0);J,K=divmod(F(G.argmax()),B(E))                                                                                                                             
+    if G[J,K]>=thr:D[D==E[K]]=E[J]                                                                                                                                                                      
+    return D                                                                                                                                                                                            
+def Av(X):                                                                                                                                                                                              
+    X=A.asarray(X,A.float32)                                                                                                                                                                            
+    if D(X.shape)<3:return .0                                                                                                                                                                           
+    X=X-X.mean(0,keepdims=True);return H(T(n_components=1,random_state=42).fit(X).explained_variance_ratio_[0])                                                                                         
+def s(X,n=1):                                                                                                                                                                                           
+    X=A.asarray(X,A.float32)                                                                                                                                                                            
+    if D(X.shape)<3 or n<1:return C(X)                                                                                                                                                                  
+    X=X-X.mean(0,keepdims=True);n=D(F(n),X.shape[1]-1,X.shape[0]-1)                                                                                                                                     
+    if n<1:return C(X)                                                                                                                                                                                  
+    B=T(n_components=n,random_state=42).fit(X);return C(X-B.inverse_transform(B.transform(X)))                                                                                                          
+def Aw(docs,sif=0):                                                                                                                                                                                     
+    J=docs                                                                                                                                                                                              
+    try:K=V(min_df=AK,stop_words='english',dtype=A.int32,max_features=AL);K.fit(J)                                                                                                                      
+    except I:return                                                                                                                                                                                     
+    F=K.vocabulary_                                                                                                                                                                                     
+    if B(F)<10:return                                                                                                                                                                                   
+    c=K.build_analyzer();G,Q=[],[]                                                                                                                                                                      
+    for R in J:                                                                                                                                                                                         
+        S=[F[A]for A in c(R)if A in F]                                                                                                                                                                  
+        for(U,W)in i(S):                                                                                                                                                                                
+            for X in S[U+1:U+1+AJ]:G.append(W);Q.append(X);G.append(X);Q.append(W)                                                                                                                      
+    if not G:return                                                                                                                                                                                     
+    M=B(F);E=u((A.ones(B(G),dtype=A.float32),(G,Q)),shape=(M,M)).tocsr();E.sum_duplicates();Y=E.sum()                                                                                                   
+    if Y<=0:return                                                                                                                                                                                      
+    d=A.asarray(E.sum(axis=1)).ravel();e=A.asarray(E.sum(axis=0)).ravel();E=E.tocoo()                                                                                                                   
+    with A.errstate(divide='ignore',invalid='ignore'):N=A.log(E.data*Y/(d[E.row]*e[E.col]+1e-12)+1e-12)                                                                                                 
+    N[~A.isfinite(N)]=.0;O=N>0                                                                                                                                                                          
+    if not O.any():return                                                                                                                                                                               
+    Z=u((N[O],(E.row[O],E.col[O])),shape=(M,M)).tocsr();R=D(AI,L(2,D(Z.shape)-1));a=C(T(n_components=R,random_state=42).fit_transform(Z))                                                               
+    if sif:b=K.transform(J).astype(A.float32);P=A.asarray(b.sum(0)).ravel();P=P/L(H(P.sum()),1.);f=(w/(w+P)).astype(A.float32);return C(A.asarray(b.multiply(f)@a))                                     
+    h=g(vocabulary=F,stop_words='english',sublinear_tf=True,dtype=A.float32);return C(h.fit_transform(J)@a)                                                                                             
+def t(docs):                                                                                                                                                                                            
+    H=B(docs)                                                                                                                                                                                           
+    for J in({True:2,False:1}[H>=50],1):                                                                                                                                                                
+        F=[]                                                                                                                                                                                            
+        for K in(dict(stop_words='english',ngram_range=(1,2),analyzer='word'),dict(analyzer='char_wb',ngram_range=(3,5))):                                                                              
+            try:                                                                                                                                                                                        
+                E=g(max_features=100000,min_df=J,max_df=.5,sublinear_tf=True,dtype=A.float32,**K).fit_transform(docs)                                                                                   
+                if E.shape[1]>=2:F.append(C(E))                                                                                                                                                         
+            except I:continue                                                                                                                                                                           
+        if F:                                                                                                                                                                                           
+            E=N(F).tocsr()if B(F)>1 else F[0];G=D(AM,E.shape[1]-1,L(2,E.shape[0]-1))                                                                                                                    
+            if G<2:return                                                                                                                                                                               
+            return C(T(n_components=G,random_state=42).fit_transform(E))                                                                                                                                
+def Ax():                                                                                                                                                                                               
+    global S                                                                                                                                                                                            
+    if S is not None:return S                                                                                                                                                                           
+    G=Ak                                                                                                                                                                                                
+    if not G:return                                                                                                                                                                                     
+    H=l.decompress(B2(G));I=(W+X)*J;D=(I+3)//4;L=A.frombuffer(H[:D],A.uint8);C=A.zeros(B(L)*4,A.uint8)                                                                                                  
+    for M in K(4):C[M::4]=L>>2*M&3                                                                                                                                                                      
+    C=C[:I].reshape(W+X,J);N=A.frombuffer(H[D:D+J*16],A.float32).reshape(J,4);E=A.empty(C.shape,A.float32)                                                                                              
+    for F in K(J):E[:,F]=N[F][C[:,F]]                                                                                                                                                                   
+    S=E;return E                                                                                                                                                                                        
+def Ay(docs):                                                                                                                                                                                           
+    E=docs;F=Ax()                                                                                                                                                                                       
+    if F is None:return                                                                                                                                                                                 
+    try:                                                                                                                                                                                                
+        I=O(n_features=W,ngram_range=(1,2),analyzer='word',alternate_sign=False,norm=None,dtype=A.float32);J=O(n_features=X,ngram_range=(3,5),analyzer='char_wb',alternate_sign=False,norm=None,dtype=A 
+        for D in K(0,B(E),4000):G=N([I.transform(E[D:D+4000]),J.transform(E[D:D+4000])]).tocsr();G.data=A.log1p(G.data).astype(A.float32);H[D:D+4000]=A.asarray(C(G)@F,dtype=A.float32)                 
+        return C(H)                                                                                                                                                                                     
+    except R:return                                                                                                                                                                                     
+def Az(Z,k=None,alpha=None,iters=None):                                                                                                                                                                 
+    E=iters;B=alpha;k=AQ if k is None else k;B=AR if B is None else B;E=AS if E is None else E;G=Z.shape[0];H=D(k+1,G-1)                                                                                
+    if H<2:return Z                                                                                                                                                                                     
+    J,L=Q(n_neighbors=H,metric='cosine').fit(Z).kneighbors(Z)                                                                                                                                           
+    for J in K(E):                                                                                                                                                                                      
+        I=A.empty_like(Z)                                                                                                                                                                               
+        for F in K(0,G,2000):I[F:F+2000]=Z[L[F:F+2000,1:]].mean(axis=1)                                                                                                                                 
+        Z=C((1.-B)*Z+B*I)                                                                                                                                                                               
+    return Z                                                                                                                                                                                            
+def A_(Z,dim=None,k=15):                                                                                                                                                                                
+    B=dim;B=y if B is None else B;E=Z.shape[0]                                                                                                                                                          
+    if E<50 or B<=0:return                                                                                                                                                                              
+    try:F=Q(n_neighbors=D(k,E-1),metric='cosine').fit(Z).kneighbors_graph(Z,mode='connectivity');F=(F+F.T>0).astype(A.float32);G=A.asarray(F.sum(axis=1)).ravel();G[G==0]=1.;H=1./A.sqrt(G);I=U(F.multi 
+    except R:return                                                                                                                                                                                     
+def B0(Z,k=None,sample=1500):k=A3 if k is None else k;F=Q(n_neighbors=D(k+1,B(Z)-1),metric='cosine').fit(Z);E=F.kneighbors(Z)[0][:,1:];C=A.random.default_rng(0).choice(B(Z),D(sample,B(Z)),replace=Fal 
+def B1(rel):B=H(A.clip((rel-A1)/(Ai-A1),.0,1.));return F(round(v+(Aa-v)*B)),H(q+(Ag-q)*B)                                                                                                               
+def h(docs,n_total,mask):                                                                                                                                                                               
+    C=docs                                                                                                                                                                                              
+    try:                                                                                                                                                                                                
+        G=t(C)                                                                                                                                                                                          
+        if G is None:raise I                                                                                                                                                                            
+        K=L(2,D(60,B(C)//40));H=x(K,random_state=0,n_init=3).fit_predict(G)                                                                                                                             
+    except R:H=A.zeros(B(C),A.int64)                                                                                                                                                                    
+    E,J=[],0                                                                                                                                                                                            
+    for M in mask:                                                                                                                                                                                      
+        if M:E.append(-1)                                                                                                                                                                               
+        else:E.append(F(H[J]));J+=1                                                                                                                                                                     
+    return E                                                                                                                                                                                            
+def B2(s):                                                                                                                                                                                              
+    B=A=0;C=bytearray()                                                                                                                                                                                 
+    for D in s:                                                                                                                                                                                         
+        B=B<<15|M(D)-19968;A+=15                                                                                                                                                                        
+        while A>=8:A-=8;C.append(B>>A&255)                                                                                                                                                              
+    return bytes(C)                                                                                                                                                                                     
+Z=8e1                                                                                                                                                                                                   
+A6,A7,BW=8192,4096,24                                                                                                                                                                                   
+B3,B4=80,.4                                                                                                                                                                                             
+B5,BX,BY=4.,.5,13e1                                                                                                                                                                                     
+A8,B6,BZ=6000,4000,32                                                                                                                                                                                   
+Ba,B7,Bb=.4,.6,0                                                                                                                                                                                        
+A9,AA,Bc,Bd=.5,1.,1.,1.                                                                                                                                                                                 
+B8=E.compile('[^\\w\\s]')                                                                                                                                                                               
+B9,BA,BB,BC=.35,8000,.35,8000                                                                                                                                                                           
+BD=''
+a=E.compile('https?://\\S+|www\\.\\S+')                                                                                                                                                                 
+BE=E.compile('^rt\\s+',E.IGNORECASE)                                                                                                                                                                    
+d=E.compile('@\\w+')                                                                                                                                                                                    
+AB=E.compile('#(\\w+)')                                                                                                                                                                                 
+BF=E.compile('(?<=[a-z0-9])(?=[A-Z])')                                                                                                                                                                  
+BG=E.compile('(.)\\1{2,}')                                                                                                                                                                              
+e=E.compile('\\s+')                                                                                                                                                                                     
+BH=E.compile("[^\\W\\d_][\\w\\-']*",E.UNICODE)                                                                                                                                                          
+BI=j('a an the of for and or to in on with by from at as is are be been we our us\nthis that it its i you your he she they them his her their what which who when where how\nall any both each few more ')
+def BJ(t):                                                                                                                                                                                              
+    if not k(t,G):t=G(t)                                                                                                                                                                                
+    t=t.lower();t=a.sub(' ',t);t=d.sub(' ',t);t=AB.sub('\\1',t);return not e.sub(' ',B8.sub(' ',t)).strip()                                                                                             
+def AC(t):                                                                                                                                                                                              
+    if not k(t,G):t=G(t)                                                                                                                                                                                
+    t=a.sub(' ',t);t=BE.sub(' ',t);t=d.sub(' ',t);t=AB.sub('\\1',t);t=BF.sub(' ',t);t=BG.sub('\\1\\1',t);return e.sub(' ',t).strip()[:B6]                                                               
+def BK(t):return[A for A in(A.group(0).lower()for A in BH.finditer(t))if B(A)>2 and A not in BI]                                                                                                        
+def AD(C,k1=3.,b=.75):C=C.tocsr().astype(A.float32);D=A.asarray(C.sum(1)).ravel();F=L(H(D.mean()),1e-09);E=A.asarray((C>0).sum(0)).ravel();G=A.log(1.+(C.shape[0]-E+.5)/(E+.5)).astype(A.float32);B=C.t 
+def BL(P,title=False):                                                                                                                                                                                  
+    K,L=(B9,BA)if title else(BB,BC);E=[]                                                                                                                                                                
+    try:E.append(AD(V(ngram_range=(1,2),min_df=2,max_df=.95,max_features=20000,stop_words='english',dtype=A.float32).fit_transform(P)))                                                                 
+    except I:pass                                                                                                                                                                                       
+    try:                                                                                                                                                                                                
+        G=AD(V(analyzer='char_wb',ngram_range=(3,5),min_df=2,max_df=.95,max_features=L,dtype=A.float32).fit_transform(P))                                                                               
+        if G.shape[1]>0:E.append(G*K)                                                                                                                                                                   
+    except I:pass                                                                                                                                                                                       
+    if not E:return                                                                                                                                                                                     
+    H=C(E[0]if B(E)==1 else N(E).tocsr());J=F(D(192,H.shape[1]-1,B(P)-1));return C(T(J,random_state=0).fit_transform(H)).astype(A.float32)if J>=2 else None                                             
+def BM(texts):                                                                                                                                                                                          
+    K=[BK(AC(A))for A in texts];L={}                                                                                                                                                                    
+    for E in K:                                                                                                                                                                                         
+        for M in j(E):L[M]=L.get(M,0)+1                                                                                                                                                                 
+    G=[A for(A,B)in L.items()if B>=3]                                                                                                                                                                   
+    G.sort(key=lambda w:(-L[w],w))                                                                                                                                                                      
+    if B(G)>6000:G=G[:6000]                                                                                                                                                                             
+    if B(G)<50:return                                                                                                                                                                                   
+    Q={B:A for(A,B)in i(G)};N,S=[],[]                                                                                                                                                                   
+    for(X,E)in i(K):                                                                                                                                                                                    
+        for M in j(E):                                                                                                                                                                                  
+            V=Q.get(M)                                                                                                                                                                                  
+            if V is not None:N.append(X);S.append(V)                                                                                                                                                    
+    if not N:return                                                                                                                                                                                     
+    O=U((A.ones(B(N),A.float32),(N,S)),shape=(B(K),B(Q)));I=(O.T@O).toarray().astype(A.float32);A.fill_diagonal(I,.0);W=H(I.sum())                                                                      
+    if W<=0:return                                                                                                                                                                                      
+    Y=I.sum(1,keepdims=True);Z=I.sum(0,keepdims=True)                                                                                                                                                   
+    with A.errstate(divide='ignore',invalid='ignore'):J=A.log(I*(W/(Y*Z+1e-12))+1e-12,dtype=A.float32)                                                                                                  
+    del I;J[~A.isfinite(J)]=.0;A.maximum(J,.0,out=J);E=F(D(96,B(Q)-1))                                                                                                                                  
+    if E<2:return                                                                                                                                                                                       
+    a=C(T(E,random_state=0).fit_transform(J));del J;b=A.log(B(K)/(1.+A.asarray(O.sum(0)).ravel()));P=C(O.multiply(b).tocsr()@a).astype(A.float32);R=A.abs(P).sum(1)<1e-09                               
+    if R.any():P[R]=A.random.RandomState(0).normal(size=(F(R.sum()),P.shape[1]))*.001                                                                                                                   
+    return P                                                                                                                                                                                            
+def BN(s):                                                                                                                                                                                              
+    A=0                                                                                                                                                                                                 
+    for B in s[2:]:A=A<<15|M(B)-19968                                                                                                                                                                   
+    return A.to_bytes(M(s[0])-19968<<15|M(s[1])-19968,'big')                                                                                                                                            
+def BO(title=False):C=l.decompress(BN(BD));B,D,M=struct.unpack('<IIB',C[:9]);J=A.cumsum(A.frombuffer(C[9:9+2*B],A.uint16).astype(A.int64))-1;G=B*D;E=(G+1)//2;H=A.frombuffer(C[9+2*B:9+2*B+E],A.uint8); 
+def BP(texts,title=False):                                                                                                                                                                              
+    F=texts                                                                                                                                                                                             
+    try:                                                                                                                                                                                                
+        G=BO(title);J=O(n_features=A6,ngram_range=(1,2),analyzer='word',alternate_sign=False,norm=None,dtype=A.float32);L=O(n_features=A7,ngram_range=(3,5),analyzer='char_wb',alternate_sign=False,nor 
+        for D in K(0,B(F),4000):I=[BS(A)for A in F[D:D+4000]];E=N([J.transform(I),L.transform(I)]).tocsr();E.data=A.log1p(E.data).astype(A.float32);H[D:D+4000]=A.asarray(C(E)@G,dtype=A.float32);del E 
+        return C(H)                                                                                                                                                                                     
+    except R:return                                                                                                                                                                                     
+BQ=E.compile('[^\\w\\s]')                                                                                                                                                                        
+BR=E.compile('&\\w+;')                                                                                                                                                                                  
+def BS(t):                                                                                                                                                                                              
+    if not k(t,G):t=G(t)                                                                                                                                                                                
+    t=a.sub(' ',t);t=d.sub(' ',t);t=t.lower();t=BR.sub(' ',t);t=BQ.sub(' ',t);return e.sub(' ',t).strip()[:1000]                                                                                        
+def BT(Z,k=20,alpha=.4,iters=4):                                                                                                                                                                        
+    F=alpha                                                                                                                                                                                             
+    try:                                                                                                                                                                                                
+        G=Q(n_neighbors=D(k+1,B(Z)-1),metric='cosine').fit(Z).kneighbors(Z)[1][:,1:];E=Z                                                                                                                
+        for H in K(iters):E=C((1-F)*E+F*E[G].mean(1))                                                                                                                                                   
+        return E.astype(A.float32)                                                                                                                                                                      
+    except R:return Z                                                                                                                                                                                   
+def BU(Z,k=12,sample=1500):E=Q(n_neighbors=D(k+1,B(Z)-1),metric='cosine').fit(Z).kneighbors(Z)[0][:,1:];F=H(E[:,-1].mean());C=A.random.default_rng(0).choice(B(Z),D(sample,B(Z)),replace=False);G=1.-Z[ 
+def BV(texts):                                                                                                                                                                                          
+    L=texts                                                                                                                                                                                             
+    try:                                                                                                                                                                                                
+        S=P.time();G=B(L);V=G>A8;M=A.sort(A.random.default_rng(0).choice(G,A8,replace=False))if V else A.arange(G);W=[L[A]for A in M];e=[AC(A)for A in W];I=[];X=BL(e,True)                             
+        if X is not None and A9>0:I.append(C(X)*A9)                                                                                                                                                     
+        if P.time()-S<Z*.45 and AA>0:                                                                                                                                                                   
+            Y=BM(W)                                                                                                                                                                                     
+            if Y is not None:I.append(C(Y)*AA)                                                                                                                                                          
+        N=BP(L,True)if P.time()-S<Z*.62 else None                                                                                                                                                       
+        if N is not None:I.append(C(N[M])*B5)                                                                                                                                                           
+        if not I:return                                                                                                                                                                                 
+        O=C(A.hstack(I))if B(I)>1 else I[0]                                                                                                                                                             
+        if P.time()-S<Z*.62:O=BT(O,alpha=B7)                                                                                                                                                            
+        k,f=BU(O);a=A.fromiter((BJ(A)for A in L),bool,G);g,b=F(B3),H(B4);c=o(p(O,'average','cosine'),g,'maxclust').astype(A.int64)                                                                      
+        if not V:E,T=c,f[:,-1]                                                                                                                                                                          
+        else:                                                                                                                                                                                           
+            U=C(N)if N is not None else None                                                                                                                                                            
+            if U is None:return                                                                                                                                                                         
+            h=Q(n_neighbors=D(5,B(M)),metric='cosine').fit(U[M]);E=A.empty(G,A.int64);T=A.empty(G,A.float32)                                                                                            
+            for J in K(0,G,5000):i,j=h.kneighbors(U[J:J+5000]);E[J:J+5000]=[A.bincount(B).argmax()for B in c[j]];T[J:J+5000]=i[:,-1]                                                                    
+        if b>0:d=A.argsort(-T)[:F(G*b)];E[d]=A.arange(1000000,1000000+B(d))                                                                                                                             
+        l,E=A.unique(E,return_inverse=True);E=E.astype(A.int64)                                                                                                                                         
+        if a.any():E[a]=-1                                                                                                                                                                              
+        return[F(A)for A in E]                                                                                                                                                                          
+    except R:return                                                                                                                                                                                     
+def RED(lab,Z,t=.76,ms=5):                                                                                                                                                                              
+    lab=A.asarray(lab,A.int64).copy();ids,c=A.unique(lab,return_counts=True);Cc,Nn=ids[c>=ms],ids[c<ms]                                                                                                 
+    if B(Cc)<1 or B(Nn)<1:return lab                                                                                                                                                                    
+    M=C(A.stack([Z[lab==i].mean(0)for i in Cc]))                                                                                                                                                        
+    for i in Nn:                                                                                                                                                                                        
+        m=lab==i;s=Z[m]@M.T;bb,v=s.argmax(1),s.max(1)                                                                                                                                                   
+        for jj,k in enumerate(A.where(m)[0]):                                                                                                                                                           
+            if v[jj]>=t:lab[k]=Cc[bb[jj]]                                                                                                                                                               
+    return lab                                                                                                                                                                                          
+def MNN(l,Z):                                                                                                                                                                                           
+    l=A.asarray(l,A.int64).copy()                                                                                                                                                                       
+    for t,ms,r in((.8,1,1),(.86,5,4)):                                                                                                                                                                  
+        for _ in K(r):                                                                                                                                                                                  
+            ids,c=A.unique(l,return_counts=True);s=ids[c<=ms]                                                                                                                                           
+            if B(s)<2:break                                                                                                                                                                             
+            Cc=C(A.stack([Z[l==i].mean(0)for i in s]))                                                                                                                                                  
+            d,I=Q(n_neighbors=2,metric="cosine").fit(Cc).kneighbors(Cc);hit=0                                                                                                                           
+            for a_ in K(B(s)):                                                                                                                                                                          
+                b_=F(I[a_,1])                                                                                                                                                                           
+                if 1.-d[a_,1]>=t and F(I[b_,1])==a_ and s[a_]<s[b_]:l[l==s[b_]]=s[a_];hit=1                                                                                                             
+            if not hit:break                                                                                                                                                                            
+            _,l=A.unique(l,return_inverse=True)                                                                                                                                                         
+    return l                                                                                                                                                                                            
+                                                                                                                                                                                                        
+def cluster_texts(texts:c[G])->c[F]:                                                                                                                                                                    
+    d=texts;u=P.perf_counter();U=B(d)                                                                                                                                                                   
+    if U<3:return c(K(U))                                                                                                                                                                               
+    A1=[Ar(A)for A in d];V=[B(A)==0 for A in A1];I=[A for(A,B)in zip(A1,V)if not B]                                                                                                                     
+    if B(I)<3:return[0]*U                                                                                                                                                                               
+    try:                                                                                                                                                                                                
+        J=B(I)                                                                                                                                                                                          
+        if J>Aj:                                                                                                                                                                                        
+            try:A6=g(max_features=60000,min_df=3,max_df=.5,stop_words='english',ngram_range=(1,2),sublinear_tf=True,dtype=A.float32).fit_transform(I);AG=D(128,A6.shape[1]-1,J-1);G=C(T(n_components=L( 
+            except R:G=t(I)                                                                                                                                                                             
+            if G is None:return h(I,U,V)                                                                                                                                                                
+            S=L(2,D(F(A.sqrt(J/2)*2),400));E=x(n_clusters=D(S,J-1),random_state=42,n_init=3,batch_size=4096,max_iter=100).fit_predict(G).astype(A.int64);AH=Q(n_neighbors=D(A3+1,J-1),metric='euclidean 
+            if W>0:O=i.copy();O[e>0]=-1.;M=A.argpartition(-O,W-1)[:W];M=M[O[M]>=0];E[M]=A.arange(1000000,1000000+B(M))                                                                                  
+            v,E=A.unique(E,return_inverse=True);X,f=[],0                                                                                                                                                
+            for w in V:                                                                                                                                                                                 
+                if w:X.append(-1)                                                                                                                                                                       
+                else:X.append(F(E[f]));f+=1                                                                                                                                                             
+            return X                                                                                                                                                                                    
+        A7=[B(A)for A in I];A8=[A for A in A7 if A>=40];AI=H(A.median(A8 if B(A8)>=50 else A7));AJ=H(A.mean(['\n'in A for A in d]));AK=H(A.mean(['http'in A.lower()or'www.'in A.lower()for A in d]));N= 
+        if N:                                                                                                                                                                                           
+            AA=BV(d)                                                                                                                                                                                    
+            if AA is not None:return AA                                                                                                                                                                 
+        Z=t(I);a=Av(Z)if Z is not None else .0;j=not N and a>AV;Y=[];k=Aw(I,sif=N)                                                                                                                      
+        if k is not None:                                                                                                                                                                               
+            if N:l=Ad                                                                                                                                                                                   
+            elif j:l=Ae                                                                                                                                                                                 
+            elif a<b:l=1                                                                                                                                                                                
+            else:l=3 if 230<AI<330 else A0                                                                                                                                                              
+            k=s(k,l);Y.append(C(k)*(1. if N else 1.4))                                                                                                                                                  
+        if Z is not None:                                                                                                                                                                               
+            if j and z:Z=s(Z,z)                                                                                                                                                                         
+            AL=1. if N or j else AX if a<b else AW;Y.append(C(Z)*AL)                                                                                                                                    
+        AB=Ay(I)if A9>0 else None                                                                                                                                                                       
+        if AB is not None:Y.append(C(AB)*A9)                                                                                                                                                            
+        if not Y:return h(I,U,V)                                                                                                                                                                        
+        G=C(A.hstack(Y))if B(Y)>1 else Y[0]                                                                                                                                                             
+        if(not N or Ac)and P.perf_counter()-u<r*.45:G=Az(G,k=12 if 230<AI<330 else 12,alpha=.2 if 230<AI<330 else .1,iters=1)                                                                           
+        if not N and P.perf_counter()-u<r*.55:                                                                                                                                                          
+            AM=(36 if j else 16 if a<b else y)if 230<AI<330 else(AT if j else AU if a<b else y);AC=A_(G,dim=AM)                                                                                         
+            if AC is not None:G=C(A.hstack([G,AC]))                                                                                                                                                     
+        if P.perf_counter()-u>r:return h(I,U,V)                                                                                                                                                         
+        AQ,AD=B0(G,k=16 if 230<AI<330 else A3);S,AE=(Ab,Ah)if N else B1(AQ);AR=J>A2                                                                                                                     
+        if AR:                                                                                                                                                                                          
+            m=A.sort(A.random.default_rng(0).choice(J,A2,replace=False));S=D(S,B(m)-1);AS=o(p(G[m],'average','cosine'),S,'maxclust').astype(A.int64);Aa=Q(n_neighbors=D(5,B(m)),metric='cosine').fit(G[ 
+            for n in K(0,J,5000):v,Ag=Aa.kneighbors(G[n:n+5000]);E[n:n+5000]=[A.bincount(B).argmax()for B in AS[Ag]]                                                                                    
+            i=AD[:,-1]                                                                                                                                                                                  
+        else:                                                                                                                                                                                           
+            _L=p(G,'average','cosine')                                                                                                                                                                  
+            if 230<AI<330:S,AE=28,0.2                                                                                                                                                                   
+            S=D(S,J-1);E=o(_L,S,'maxclust').astype(A.int64);i=AD[:,-1]                                                                                                                                  
+        e=A.fromiter((A4(A)for A in I),A.int16,J);E=A5(E,e)                                                                                                                                             
+        if N:                                                                                                                                                                                           
+            for v in K(2):AF=A.unique(E);Ai=C(A.stack([G[E==A].mean(0)for A in AF]));E=AF[(G@Ai.T).argmax(1)]                                                                                           
+        elif a<b:E=Au(I,E)                                                                                                                                                                              
+        if AE>0:                                                                                                                                                                                        
+            W=F(J*AE)                                                                                                                                                                                   
+            if W>0:                                                                                                                                                                                     
+                O=i.copy();O[e>0]=-1.                                                                                                                                                                   
+                if N or a<b:O=At(O,E,G,J)                                                                                                                                                               
+                M=A.argpartition(-O,W-1)[:W];M=M[O[M]>=0];E=E.copy();E[M]=A.arange(1000000,1000000+B(M))                                                                                                
+        if not N and not 230<AI<330:E=RED(E,G,.77);_,E=A.unique(E,return_inverse=True)                                                                                                                  
+        if not N and not 230<AI<330:E=MNN(E,G);_,E=A.unique(E,return_inverse=True)                                                                                                                      
+        v,E=A.unique(E,return_inverse=True);X,f=[],0                                                                                                                                                    
+        for w in V:                                                                                                                                                                                     
+            if w:X.append(-1)                                                                                                                                                                           
+            else:X.append(F(E[f]));f+=1                                                                                                                                                                 
+        return X                                                                                                                                                                                        
+    except R:return h(I,U,V)                                                                                                                                                                            
+def make_app()->m:                                                                                                                                                                                      
+    A=m(title='Text Clustering Miner')                                                                                                                                                                  
+    @A.get('/health')                                                                                                                                                                                   
+    def B():return{'status':'healthy'}                                                                                                                                                                  
+    @A.post('/cluster',response_model=Y)                                                                                                                                                                
+    def C(request:Aq)->Y:                                                                                                                                                                               
+        A=request                                                                                                                                                                                       
+        if not A.texts:raise AH(status_code=400,detail='No texts provided')                                                                                                                             
+        return Y(cluster_ids=cluster_texts(A.texts))                                                                                                                                                    
+    return A                                                                                                                                                                                            
+if __name__=='__main__':
+    f=AF.ArgumentParser();f.add_argument('--port',type=F,default=8001);f.add_argument('--host',type=G,default='0.0.0.0');AE=f.parse_args();uvicorn.run(make_app(),host=AE.host,port 
+
