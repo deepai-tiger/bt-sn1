@@ -1,0 +1,9 @@
+{
+  "base": {},
+  "knn15": {"title_spectral_knn": 15},
+  "spec16": {"title_reduce_dim": 16},
+  "smooth_4it": {"title_smooth_iters": 4},
+  "char_w0.6": {"title_char_weight": 0.6},
+  "knn15+spec16": {"title_spectral_knn": 15, "title_reduce_dim": 16},
+  "knn15+smooth4": {"title_spectral_knn": 15, "title_smooth_iters": 4}
+}

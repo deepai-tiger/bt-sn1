@@ -27,15 +27,35 @@ OUT = Path("/tmp/sn1_distill")
 EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
 
-def sample(path: Path, count: int, seed: int) -> list[str]:
+def evaluation_texts(dirs: list[Path]) -> set[str]:
+    """Every text used by any evaluation round.
+
+    The distilled embedding predicts the very quantity the ground truth is
+    derived from, so training it on the texts it is then scored on inflates the
+    result. The corpus and the rounds are drawn from the same dump, so the
+    overlap is otherwise total: each round's 5000 titles all sit in the
+    training sample.
+    """
+    seen: set[str] = set()
+    for directory in dirs:
+        for path in sorted(directory.glob("round_*_subset_*.json")):
+            seen.update(json.loads(path.read_text())["texts"])
+    return seen
+
+
+def sample(path: Path, count: int, seed: int, exclude: set[str]) -> list[str]:
     if not path.exists():
         return []
     with path.open(encoding="utf-8") as fh:
         texts = [json.loads(line)["text"] for line in fh]
+    kept = [t for t in texts if t not in exclude]
+    dropped = len(texts) - len(kept)
+    if dropped:
+        print(f"  dropped {dropped} texts held by evaluation rounds", flush=True)
     rng = random.Random(seed)
-    if len(texts) > count:
-        texts = rng.sample(texts, count)
-    return texts
+    if len(kept) > count:
+        kept = rng.sample(kept, count)
+    return kept
 
 
 def main() -> None:
@@ -46,6 +66,8 @@ def main() -> None:
     parser.add_argument("--batch", type=int, default=256)
     parser.add_argument("--seed", type=int, default=11)
     parser.add_argument("--out", type=Path, default=OUT)
+    parser.add_argument("--rounds-dir", action="append", type=Path,
+                        default=None, help="round directories to hold out")
     args = parser.parse_args()
 
     from sentence_transformers import SentenceTransformer
@@ -53,13 +75,17 @@ def main() -> None:
     args.out.mkdir(parents=True, exist_ok=True)
     model = SentenceTransformer(EMBED_MODEL)
 
+    rounds = args.rounds_dir or [Path("/tmp/sn1_rounds"), Path("/tmp/sn1_holdout")]
+    exclude = evaluation_texts([d for d in rounds if d.exists()])
+    print(f"holding out {len(exclude)} texts used by evaluation rounds")
+
     jobs = [("arxiv", args.arxiv), ("tweets", args.tweets), ("reddit", args.reddit)]
     for name, count in jobs:
         dest = args.out / f"{name}.npz"
         if dest.exists():
             print(f"{name}: exists, skipping", flush=True)
             continue
-        texts = sample(CORPUS_DIR / f"{name}.jsonl", count, args.seed)
+        texts = sample(CORPUS_DIR / f"{name}.jsonl", count, args.seed, exclude)
         if not texts:
             print(f"{name}: no corpus file, skipping", flush=True)
             continue

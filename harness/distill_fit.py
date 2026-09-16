@@ -173,21 +173,33 @@ def quantize_magnitudes(norms: np.ndarray):
     return codes, levels
 
 
-def prune_rows(W: np.ndarray, fraction: float) -> np.ndarray:
-    """Zero the `fraction` of rows with the smallest norm.
+def prune_rows(W: np.ndarray, fraction: float, gram: np.ndarray | None = None,
+               criterion: str = "norm") -> np.ndarray:
+    """Zero the least useful `fraction` of rows.
 
     Hash buckets have wildly uneven importance: most correspond to n-grams
     that barely occur, and their rows contribute almost nothing to any
-    document embedding. Zeroing them is close to free in accuracy and buys a
-    lot of budget, because identical all-zero code and magnitude bytes are
-    exactly what the compressor is good at.
+    document embedding. Zeroing them buys a lot of budget, because identical
+    all-zero code and magnitude bytes are exactly what the compressor is good
+    at.
+
+    Row norm alone is a poor importance measure, though, because a rare
+    n-gram can carry a large row it almost never contributes. The gram
+    diagonal is that bucket's total squared mass over the corpus, so
+    `norm * sqrt(diag)` measures what the row actually contributes. It is
+    worth far more the harder the pruning: at 80% it holds fidelity at 0.53
+    where row norm alone collapses to 0.40. Both are about equal at the 50%
+    we ship, where pruning is mild enough to act as extra regularization.
     """
     if fraction <= 0:
         return W
-    norms = np.linalg.norm(W, axis=1)
-    cutoff = float(np.quantile(norms, fraction))
+    score = np.linalg.norm(W, axis=1)
+    if criterion == "energy":
+        if gram is None:
+            raise SystemExit("energy pruning needs the normal equations")
+        score = score * np.sqrt(np.maximum(np.diag(gram), 0.0))
     out = W.copy()
-    out[norms <= cutoff] = 0.0
+    out[score <= float(np.quantile(score, fraction))] = 0.0
     return out
 
 
@@ -350,7 +362,8 @@ def main() -> None:
     parser.add_argument("--subspaces", type=int, default=4)
     parser.add_argument("--prototypes", type=int, default=256)
     parser.add_argument("--prune", type=float, default=0.0,
-                        help="fraction of lowest-norm rows to zero")
+                        help="fraction of least useful rows to zero")
+    parser.add_argument("--prune-by", choices=("norm", "energy"), default="norm")
     parser.add_argument("--reddit", type=int, default=70000)
     parser.add_argument("--tweets", type=int, default=70000)
     parser.add_argument("--arxiv", type=int, default=60000)
@@ -412,8 +425,8 @@ def main() -> None:
     W = solve_ridge(gram, rhs_full[:, :args.dims], args.alpha)
     print(f"  W {W.shape}")
     if args.prune > 0:
-        W = prune_rows(W, args.prune)
-        print(f"  pruned {args.prune:.0%} of rows by norm")
+        W = prune_rows(W, args.prune, gram, args.prune_by)
+        print(f"  pruned {args.prune:.0%} of rows by {args.prune_by}")
 
     print(f"product-quantizing rows: {args.subspaces} subspaces x "
           f"{args.prototypes} prototypes")
