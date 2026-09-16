@@ -153,41 +153,107 @@ them against the platform's reported statistics:
 Calibrated, the replica reproduces the platform's ordering for the first time:
 the champion reconstruction scores 0.4010 against our then-0.3879.
 
-Two cautions learned the hard way:
+Then it cost a second submission, the same way. Matching the cluster count and
+the noise share still left the *size distribution* wrong, and nothing was
+watching it:
 
-* **Calibrate against both statistics, not the mean of one.** The noise share
-  drives structural decisions directly, and `metadata*.json` is the only
-  window onto it. arXiv sitting 10 points higher in noise than social is not a
-  detail; it changes which noise mode is optimal.
+|  | largest cluster (mean) | largest cluster (range) |
+|---|---|---|
+| replica social | 894 | 338-1571 |
+| platform social | 509 | 252-907 |
+| replica arXiv | 958 | 511-1628 |
+| platform arXiv | 538 | 470-588 |
+
+A subset whose largest cluster holds 1804 of 5000 points has a third of its
+mass in one lump, and pulling every point into a cluster is close to free on
+it. The platform never hands out a round like that, so the replica again
+rewarded the strategy it had been built to measure, and again the
+recommendation lost about 0.10 on the real rounds.
+
+The cause was seed collisions: two slices drawn into the same neighbourhood
+bake as one cluster. `min_sep` rejects a seed too similar to one already used,
+which brings the largest cluster to ~533 against 509 and lifts the count to
+~42 against ~41 without touching the noise share. On top of that, subsets
+outside the envelope the platform's twelve observed subsets span are resampled
+rather than scored (`ENVELOPE`), because such a subset is not a hard round, it
+is a round that does not occur.
+
+Three cautions, each learned the same expensive way:
+
+* **Score every statistic the platform reports, not the ones you thought
+  mattered.** Clusters and noise were matched to within a point while the
+  largest cluster was off by 75%, and that was the one driving the decision.
+  `shape_error` now covers all four.
+* **A matched aggregate is not a matched distribution.** The mean can land on
+  target while the tail contains subsets the platform would never produce, and
+  a tuner will happily exploit exactly those.
 * **Do not chase the argmax cell.** A single seed draw swings the baked shape
   a long way -- n_topics 35 against 40 at the same tail and spread gave 22
-  clusters at 2% noise against 41 at 15%. Pick central knobs and let
-  individual subsets scatter, as the platform's own do.
+  clusters at 2% noise against 41 at 15%. Pick central knobs, average several
+  draws (`--draws`), and let individual subsets scatter as the platform's do.
 
-## The noise share decides the output shape
+## What to do with the points the clusterer will not place
 
-`noise_sensitivity.py` scores all three noise modes on every subset and groups
-by how much noise the ground truth actually holds. Over 36 subsets:
+This is the highest-leverage setting in the submission, and the first two
+answers it gave were both artefacts of the replica's shape errors. On rounds
+calibrated on all four statistics:
 
-| ground-truth noise | n | reclaim | bucket | singleton |
+| | social (9) | held out (18) | arXiv (3) | held out (6) |
 |---|---|---|---|---|
-| under 18% | 16 | **0.4990** | 0.4087 | 0.4773 |
-| 18-24% | 8 | **0.4341** | 0.3718 | 0.4271 |
-| over 24% | 12 | 0.3793 | 0.3612 | **0.3865** |
+| reclaim into nearest cluster | 0.4248 | | **0.3668** | **0.3960** |
+| split into singletons | **0.4501** | | 0.3634 | |
+| one shared bucket | 0.3788 | | 0.2578 | |
 
-This is the single highest-leverage setting in the submission -- the spread
-between best and worst mode is 0.09, several times any feature change -- and
-it is entirely determined by a property of the data, not of the algorithm. It
-is also why the miscalibrated replica was so damaging: at 30-42% noise the
-table says bucket, and bucket is what the submission shipped.
+So singletons on social (+0.025, and +0.012 across all 24 held-out subsets),
+reclaiming on titles. The entire social gain is NMI -- 0.5640 to 0.6198 with
+ARI flat at 0.28 -- and that profile is the useful part: the top submissions
+report NMI 0.60-0.63 against ARI 0.27-0.32 on the real rounds, so the shape
+is corroborated from outside the replica rather than only by it.
 
-Reclaiming wins below the crossover because a rejected point is usually a real
-cluster member the clusterer was unsure of rather than something genuinely
-unclusterable, and at 17% true noise the odds favour guessing a home for it.
+**Ejecting extra points does not transfer.** The top submissions promote a
+large fixed share of every batch to noise by hand -- 25% on social, 40% on
+titles, which is what puts ~1250 singletons in their reported output -- and
+copying that costs us a great deal:
 
-The platform's social subsets sit at 13-22% and its arXiv at 26-29%, which
-straddles the crossover, so the arXiv path is deliberately set to the
-non-argmax choice: see the comment on `title_noise_mode`.
+| extra ejected | 0% | 15% | 20% | 25% (theirs) | 30% |
+|---|---|---|---|---|---|
+| social | **0.4501** | 0.4106 | 0.3923 | 0.3743 | 0.3588 |
+
+They eject by hand because their agglomerative cut has no noise label of its
+own. We run the ground truth's own clusterer, so the reject set arrives
+already identified, and adding to it only dilutes it. Reproducing a top
+submission's *output shape* without its reasons is not the same as
+reproducing its score.
+
+## The largest prize, and why it is out of reach
+
+`noise_oracle.py` holds our clustering fixed and labels the true noise set
+exactly. On arXiv that scores **0.8009** against the 0.3669 we ship: perfect
+noise detection alone is worth **+0.43**, an order of magnitude more than any
+feature or clustering change measured here. Doing the same with singletons
+instead of a bucket is worth +0.008.
+
+The asymmetry is structural. Ground truth puts 18-28% of every batch under one
+shared label, so that group is several times larger than any real cluster and
+holds roughly ten times more pairs than all real clusters combined. ARI is a
+count of pairs, so reproducing that one group is most of the available score.
+
+It is also why a bucket is dangerous rather than merely valuable: its pairs
+grow as the square of its size, so a bucket that is 40% right contributes four
+false pairs for every true one. `noise_pr.py` walks our own ranking and finds
+precision never clears 44%, against a 27% base rate:
+
+| depth | 5% | 10% | 20% | 30% |
+|---|---|---|---|---|
+| precision | 44.0% | 38.7% | 36.3% | 35.5% |
+| bucket delta | -0.005 | -0.012 | -0.029 | -0.047 |
+
+Bucketing loses at every depth, which is the whole explanation for why the
+shape table above prefers singletons and reclaiming. The ceiling here is not
+the shape and not the clusterer: it is knowing which points are noise, and
+that is a question about how faithfully our features reproduce density in the
+teacher's embedding space. `detector_ab.py` is where candidate rankings get
+compared on that precision; nothing tried so far beats the kNN score.
 
 ## Before submitting, run this
 
@@ -230,6 +296,9 @@ Two lessons worth keeping in mind, since both bugs came from the same place:
 | `make_rounds.py` | assembles focused subsets and bakes ground truth with the real pipeline; `--calibrate` fits its shape to the platform's |
 | `calibrate_gt.py` | sweeps the baking side (HDBSCAN params) against the platform's reported stats |
 | `noise_sensitivity.py` | scores every noise mode against each subset's true noise share |
+| `noise_oracle.py` | scores a perfect noise detector, to size the prize before chasing it |
+| `noise_pr.py` | precision of our noise ranking by depth, and what bucketing that prefix costs |
+| `detector_ab.py` | compares candidate noise rankings on precision at the bucket depth |
 | `score.py` | the competition metric: `(max(0, ARI) + NMI) / 2` |
 | `evaluate.py` | imports a submission's `cluster_texts` and scores it across all rounds |
 | `serve_eval.py` | serves a build as a subprocess and scores it over HTTP, as the platform does |
@@ -281,6 +350,30 @@ learn a coarse sketch. Widening the hash is the fix, and the character limit
 forbids it: the bucket count sets the row count, which sets the size. Adding
 training data no longer moves fidelity, which is what being collision-bound
 rather than data-bound looks like.
+
+### The character limit is no longer what binds
+
+Worth settling, because it is the obvious thing to reach for with 6,000
+characters spare. Spending them does nothing. Fitting the same map at several
+budgets, where `exact` is the unquantized model and `quantized` is what
+actually ships:
+
+| dims | prune | characters | exact | quantized | loss to packing |
+|---|---|---|---|---|---|
+| 32 | 0.40 | 29,564 | 0.5358 | **0.5273** | 0.0085 |
+| 48 | 0.35 | 32,990 | 0.5477 | 0.5269 | 0.0208 |
+| 48 | 0.50 | 27,136 | 0.5521 | 0.5124 | 0.0397 |
+| 64 | 0.60 | 24,692 | 0.5078 | 0.4389 | 0.0689 |
+
+Quantization costs 0.008, so even packing the current map perfectly would buy
+almost nothing, and the ceiling sits in the *unquantized* column at ~0.55.
+Predicting more of MiniLM's dimensions raises the exact model and loses more
+than that to coarser quantization. Scored end to end the 29,564-character
+refit lands at 0.4284 against the shipped blob's 0.4293 -- the same number.
+
+So the binding constraint is the linear bag-of-n-grams model itself, not the
+50,000 characters and not the packing. Beating it needs a different functional
+form rather than a bigger one, which is the open question this leaves.
 
 ## What the v2 champion export was worth
 

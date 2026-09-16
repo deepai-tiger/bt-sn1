@@ -1,0 +1,15 @@
+{
+  "current":            {},
+  "reduce_dim 6":       {"title_reduce_dim": 6},
+  "reduce_dim 14":      {"title_reduce_dim": 14},
+  "reduce_dim 20":      {"title_reduce_dim": 20},
+  "svd 40 instead":     {"title_reduce_mode": "svd", "title_reduce_dim": 40},
+  "svd 80 instead":     {"title_reduce_mode": "svd", "title_reduce_dim": 80},
+  "w_distilled 1.0":    {"title_w_distilled": 1.0},
+  "w_distilled 3.0":    {"title_w_distilled": 3.0},
+  "w_distilled 4.0":    {"title_w_distilled": 4.0},
+  "char_weight 0.25":   {"title_char_weight": 0.25},
+  "char_weight 0.65":   {"title_char_weight": 0.65},
+  "mcs 9":              {"title_min_cluster_size": 9},
+  "mcs 9 + wd 3.0":     {"title_min_cluster_size": 9, "title_w_distilled": 3.0}
+}
