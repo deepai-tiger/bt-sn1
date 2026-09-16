@@ -188,7 +188,14 @@ CONFIG: dict[str, object] = {
     # +0.016 there, which also settles the blob's domain: one map trained on
     # all three sources beats a title-specialized map now that both paths use
     # it (held out 0.4485 against 0.4309).
-    "w_distilled": 1.0,
+    # 0.5 measures best on the mpnet replica (0.3543 against 0.3527 at 1.0 and
+    # 0.3461 with the block off, 24 held-out subsets). The whole distilled
+    # block is therefore worth +0.008, which is the useful thing this number
+    # records: replacing the blob with the teacher's real embeddings is worth
+    # +0.068 at a weight of 4, so the pipeline will lean on this block hard
+    # once it deserves it, and refuses to at 0.57 fidelity. See
+    # harness/teacher_oracle.py.
+    "w_distilled": 0.5,
     "lsa_dim": 192,
     "ppmi_dim": 128,
     "ppmi_max_features": 20000,
@@ -241,12 +248,11 @@ CONFIG: dict[str, object] = {
     # and 29.3% in the two rounds we can see -- where singletons would be
     # worth about +0.005.
     #
-    # Not worth taking. The same switch costs 0.024 if a round comes in at
-    # 18-24%, so it is a five-to-one bet against on two observations.
-    # Reclaiming is within 0.005 of optimal at high noise and clearly best
-    # everywhere else, which is the setting to hold when the noise share is
-    # something we observe rather than control.
-    "title_noise_mode": "none",
+    # Settled on the mpnet replica, which is the first one whose absolute
+    # scores match the platform's: singletons on both paths, 0.3527 against
+    # reclaiming's 0.3290 over 24 held-out subsets. The MiniLM replica had said
+    # titles should reclaim, and that is one more decision it got wrong.
+    "title_noise_mode": "singleton",
     "title_noise_reclaim_thr": 0.0,
     "title_extra_noise_frac": 0.0,
     "title_noise_bucket_frac": 0.5,

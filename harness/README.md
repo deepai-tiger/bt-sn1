@@ -121,6 +121,22 @@ the subvectors get wider, and quantization gives back more than the extra
 dimensions earn (dims 64 at 8 subspaces reconstructs to 0.41, dims 32 to
 0.50).
 
+## Does the replica predict the platform? Now, yes
+
+The point of all the calibration below is this one number, and it is worth
+stating before the details. Scoring the same configurations on both replicas:
+
+| | MiniLM replica | mpnet replica | platform |
+|---|---|---|---|
+| shipped v3 (reclaim) | 0.4103 | 0.3117 | 0.3446 |
+| shipped v4 (singleton social) | 0.4293 | 0.3304 | 0.3114 |
+
+The MiniLM replica read ~0.09 high and could not rank the two builds. The
+mpnet replica lands inside the range the platform actually returns, which is
+the first time any version of this harness has done so. That is what makes the
+decisions below worth making at all -- and it arrived only after the teacher
+was corrected, not from any of the shape work.
+
 ## Calibrating the replica, and why it matters more than anything else here
 
 Running the platform's pipeline is not the same as reproducing its rounds, and
@@ -299,6 +315,8 @@ Two lessons worth keeping in mind, since both bugs came from the same place:
 | `noise_oracle.py` | scores a perfect noise detector, to size the prize before chasing it |
 | `noise_pr.py` | precision of our noise ranking by depth, and what bucketing that prefix costs |
 | `detector_ab.py` | compares candidate noise rankings on precision at the bucket depth |
+| `teacher_ab.py` | how far apart two teachers are on the neighbour sets UMAP consumes |
+| `teacher_oracle.py` | scores a perfect distilled blob, to size the prize before chasing it |
 | `score.py` | the competition metric: `(max(0, ARI) + NMI) / 2` |
 | `evaluate.py` | imports a submission's `cluster_texts` and scores it across all rounds |
 | `serve_eval.py` | serves a build as a subprocess and scores it over HTTP, as the platform does |
@@ -350,6 +368,50 @@ learn a coarse sketch. Widening the hash is the fix, and the character limit
 forbids it: the bucket count sets the row count, which sets the size. Adding
 training data no longer moves fidelity, which is what being collision-bound
 rather than data-bound looks like.
+
+### What a perfect blob would be worth, and why ours is worth 0.008
+
+`teacher_oracle.py` replaces the blob's output with the teacher's *real*
+embeddings for the same texts -- a blob of infinite fidelity, which no
+distillation can beat -- and sweeps its weight. On four subsets:
+
+| `w_distilled` | our blob | teacher |
+|---|---|---|
+| 0 (block off) | 0.3115 | -- |
+| 1 | 0.3119 | 0.3333 |
+| 2 | 0.2346 | 0.3708 |
+| 4 | 0.2297 | 0.3803 |
+| 8 | 0.2270 | **0.3882** |
+
+Two things follow. A perfect blob is worth **+0.077**, so blob fidelity is a
+real lever and not a spent one. And the optimal weight moves with quality: at
+0.57 fidelity the pipeline wants the block held at 0.5 and is actively harmed
+above 1, while a perfect one wants 8. The relationship is steeply nonlinear,
+which is why retraining against the correct teacher -- fidelity 0.5273 to
+0.5705 -- moved the score by less than the noise between two round sets. The
+block has to cross a quality threshold before anything downstream will lean on
+it.
+
+That also resolves a contradiction. Reducing with a spectral embedding
+(Laplacian eigenmaps, which is what UMAP initializes from, and the closest
+available analogue to the ground truth's nonlinear step) tested *worse* than
+linear SVD and was rejected. With good features it is the better choice:
+
+| reduction | our blob | teacher |
+|---|---|---|
+| svd 80 | **0.3115** | 0.3882 |
+| svd 12 | 0.3227 | 0.3843 |
+| spectral 12 | 0.3001 | **0.4088** |
+
+So the feature quality and the geometry have to improve together, and testing
+either alone rejects it. Our features are too noisy to survive a nonlinear
+reduction, which is the honest reason `reduce_mode` is still `svd`.
+
+Note also that a perfect blob reaches only ~0.41, not ~1.0, despite the ground
+truth being *derived* from those exact embeddings. The missing piece is the
+ground truth's UMAP, which cannot be run in the sandbox (`umap-learn` is not in
+the image and the limit forbids vendoring it). That gap -- perfect inputs, no
+UMAP -- is the real ceiling on this whole approach.
 
 ### The character limit is no longer what binds
 
