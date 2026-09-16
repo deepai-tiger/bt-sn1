@@ -40,6 +40,7 @@ makes calibrating the shape knobs affordable.
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import random
 from pathlib import Path
@@ -52,11 +53,20 @@ ROUNDS_DIR = Path("/tmp/sn1_rounds")
 SAMPLE_SIZE = 5000
 MIN_CLUSTER_SIZE = 25          # pinned: every reported subset has min 25-27
 
-# Mean over the eight subsets in champion-code/metadata*.json, the only direct
-# observation of the real pipeline's output we have.
+# Mean over the twelve subsets in champion-code/metadata*.json (rounds 52-54),
+# the only direct observation of the real pipeline's output we have.
+#
+# `size_max` is here because leaving it out cost us a submission. Matching only
+# the cluster count and the noise share still allowed subsets whose largest
+# cluster held 1804 of 5000 points, against a platform ceiling of 907 and a
+# mean of 509. A batch with a third of its mass in one cluster rewards pulling
+# every point into a cluster, so the replica recommended exactly that, and the
+# recommendation did not survive contact with the real rounds.
 TARGET = {
-    "social": {"clusters": 39.8, "noise_frac": 0.168},
-    "arxiv": {"clusters": 40.0, "noise_frac": 0.276},
+    "social": {"clusters": 40.7, "noise_frac": 0.181,
+               "size_median": 66.3, "size_max": 509.0},
+    "arxiv": {"clusters": 40.0, "noise_frac": 0.278,
+              "size_median": 61.0, "size_max": 538.0},
 }
 
 # Calibrated against TARGET; see --calibrate. Deliberately central rather than
@@ -66,15 +76,21 @@ TARGET = {
 # over a round set lands on TARGET, and that individual subsets scatter around
 # it the way the platform's own do -- its social subsets run 13-22% noise.
 SHAPE = {
-    "social": {"n_topics": 42, "tail_frac": 0.16, "spread": 2.0,
-               "min_samples": None},
+    # `min_sep` is the knob that fixed the replica. Without it two seeds drawn
+    # into the same neighbourhood bake as one cluster, and enough collisions
+    # produced subsets whose largest cluster held 1804 of 5000 points against a
+    # platform maximum of 907. Requiring seeds to be mutually dissimilar brings
+    # the largest cluster to ~497 against the platform's 509, and the cluster
+    # count up to ~41 against its ~41, without touching the noise share.
+    "social": {"n_topics": 43, "tail_frac": 0.15, "spread": 2.0,
+               "min_sep": 0.35, "skew": 0.85, "min_samples": None},
     # arXiv carries noticeably more noise than social on the platform (26-29%
     # against 13-22%), and getting that share right is not cosmetic: the best
     # way to label a rejected point flips from reclaiming it to splitting it
     # off somewhere around 24%, so a replica that under-noises titles picks
     # the wrong one. An earlier setting landed at 17-21% and did exactly that.
-    "arxiv": {"n_topics": 48, "tail_frac": 0.24, "spread": 5.0,
-              "min_samples": None},
+    "arxiv": {"n_topics": 52, "tail_frac": 0.28, "spread": 6.5,
+              "min_sep": 0.35, "skew": 0.85, "min_samples": None},
 }
 
 
@@ -95,13 +111,15 @@ def load_pool(names: list[str]) -> tuple[np.ndarray, np.ndarray]:
     return pool_texts, pool_emb
 
 
-def zipf_sizes(n_topics: int, total: int, rng: random.Random) -> list[int]:
+def zipf_sizes(n_topics: int, total: int, rng: random.Random,
+               skew: float = 0.85) -> list[int]:
     """A few large slices and many small ones, as the reported size spread shows.
 
-    The platform's subsets run to a median near 68 with a maximum in the
-    hundreds, so slice sizes cannot be uniform.
+    The platform's subsets run to a median near 66 with a maximum near 509, so
+    slice sizes are neither uniform nor steeply skewed. `skew` is the knob:
+    0 gives equal slices, and the tail gets heavier as it rises.
     """
-    weights = [1.0 / (i + 1.6) ** 0.85 for i in range(n_topics)]
+    weights = [1.0 / (i + 1.6) ** skew for i in range(n_topics)]
     rng.shuffle(weights)
     scale = total / sum(weights)
     return [max(30, int(round(w * scale))) for w in weights]
@@ -138,12 +156,29 @@ def build_subset(pool_texts: np.ndarray, pool_emb: np.ndarray, n: int,
     chosen: list[np.ndarray] = []
     topics: list[str] = []
     available = np.flatnonzero(~taken)
+    # Two seeds drawn close together produce slices that the ground-truth
+    # pipeline bakes as a single cluster, and enough of those collisions is how
+    # a 1800-point cluster appears. Requiring seeds to be mutually dissimilar
+    # keeps slices distinct, which is what holds the largest cluster near the
+    # platform's ~509 while letting the count rise to its ~41.
+    min_sep = float(shape.get("min_sep", 0.0))
+    seeds: list[int] = []
     for index, size in enumerate(sizes):
         if taken.all():
             break
-        seed = int(rng.choice(available.tolist()))
-        if taken[seed]:
+        seed = -1
+        for _ in range(60):
+            candidate = int(rng.choice(available.tolist()))
+            if taken[candidate]:
+                continue
+            if min_sep > 0.0 and seeds:
+                if float(np.max(pool_emb[seeds] @ pool_emb[candidate])) > min_sep:
+                    continue
+            seed = candidate
+            break
+        if seed < 0:
             continue
+        seeds.append(seed)
         picked = focused_slice(pool_emb, seed, size, float(shape["spread"]),
                                taken, rng)
         if len(picked) < 30:
@@ -198,33 +233,55 @@ def describe(labels: np.ndarray) -> dict:
 SOURCES = {"social": ["reddit", "tweets"], "arxiv": ["arxiv"]}
 
 
+def shape_error(info: dict, target: dict) -> float:
+    """Relative miss on all four reported statistics, weighted equally.
+
+    Counting only clusters and noise is what let the largest-cluster error
+    through, so every statistic the platform reports is scored here.
+    """
+    return (abs(info["num_clusters"] - target["clusters"]) / target["clusters"]
+            + abs(info["noise_frac"] - target["noise_frac"]) / target["noise_frac"]
+            + abs(info["cluster_size_median"] - target["size_median"])
+            / target["size_median"]
+            + abs(info["cluster_size_max"] - target["size_max"])
+            / target["size_max"])
+
+
 def calibrate(args: argparse.Namespace) -> None:
     for kind in (["social", "arxiv"] if args.kind is None else [args.kind]):
         pool_texts, pool_emb = load_pool(SOURCES[kind])
         target = TARGET[kind]
-        print(f"\n{kind}: pool {len(pool_texts)}, target "
-              f"{target['clusters']:.0f} clusters, {target['noise_frac']:.1%} noise")
-        print(f"  {'n_topics':>9}{'tail':>7}{'spread':>8}"
+        base = SHAPE[kind]
+        print(f"\n{kind}: pool {len(pool_texts)}, target {target['clusters']:.0f} "
+              f"clusters, {target['noise_frac']:.1%} noise, median "
+              f"{target['size_median']:.0f}, max {target['size_max']:.0f}")
+        print(f"  {'topics':>7}{'skew':>6}{'min_sep':>8}{'spread':>7}{'tail':>6}"
               f"{'clusters':>10}{'noise':>8}{'median':>8}{'max':>7}{'error':>8}")
-        for n_topics in args.n_topics:
-            for tail in args.tail:
-                for spread in args.spread:
-                    shape = {"n_topics": n_topics, "tail_frac": tail,
-                             "spread": spread}
-                    rng = random.Random(args.seed)
-                    taken = np.zeros(len(pool_texts), bool)
-                    indices, _ = build_subset(pool_texts, pool_emb, args.size,
-                                              shape, rng, taken)
-                    info = describe(ground_truth(pool_emb[indices], args.seed,
-                                                 args.min_samples))
-                    error = (abs(info["num_clusters"] - target["clusters"])
-                             / target["clusters"]
-                             + abs(info["noise_frac"] - target["noise_frac"])
-                             / target["noise_frac"])
-                    print(f"  {n_topics:>9}{tail:>7}{spread:>8}"
-                          f"{info['num_clusters']:>10}{info['noise_frac']:>7.1%}"
-                          f"{info['cluster_size_median']:>8}"
-                          f"{info['cluster_size_max']:>7}{error:>8.3f}", flush=True)
+        grid = itertools.product(args.n_topics, args.skew, args.min_sep,
+                                 args.spread or [base["spread"]],
+                                 args.tail or [base["tail_frac"]])
+        for n_topics, skew, min_sep, spread, tail in grid:
+            shape = dict(base, n_topics=n_topics, skew=skew,
+                         min_sep=min_sep, spread=spread,
+                         tail_frac=tail)
+            # One draw is too noisy to rank cells by; average a few.
+            stats: list[dict] = []
+            for draw in range(args.draws):
+                seed = args.seed + draw
+                rng = random.Random(seed)
+                taken = np.zeros(len(pool_texts), bool)
+                indices, _ = build_subset(pool_texts, pool_emb,
+                                          args.size, shape, rng, taken)
+                stats.append(describe(ground_truth(
+                    pool_emb[indices], seed, args.min_samples)))
+            info = {key: float(np.mean([s[key] for s in stats]))
+                    for key in stats[0]}
+            print(f"  {n_topics:>7}{skew:>6}{min_sep:>8}"
+                  f"{shape['spread']:>7}{shape['tail_frac']:>6}"
+                  f"{info['num_clusters']:>10.1f}{info['noise_frac']:>7.1%}"
+                  f"{info['cluster_size_median']:>8.0f}"
+                  f"{info['cluster_size_max']:>7.0f}"
+                  f"{shape_error(info, target):>8.3f}", flush=True)
 
 
 def main() -> None:
@@ -239,13 +296,16 @@ def main() -> None:
     parser.add_argument("--n-topics", type=int, action="append", default=None)
     parser.add_argument("--tail", type=float, action="append", default=None)
     parser.add_argument("--spread", type=float, action="append", default=None)
+    parser.add_argument("--skew", type=float, action="append", default=None)
+    parser.add_argument("--min-sep", type=float, action="append", default=None)
+    parser.add_argument("--draws", type=int, default=3)
     parser.add_argument("--min-samples", type=int, default=None)
     args = parser.parse_args()
 
     if args.calibrate:
-        args.n_topics = args.n_topics or [30, 40, 50]
-        args.tail = args.tail or [0.08, 0.16]
-        args.spread = args.spread or [1.5, 2.5, 4.0]
+        args.n_topics = args.n_topics or [42, 52, 62]
+        args.skew = args.skew or [0.85, 0.45]
+        args.min_sep = args.min_sep or [0.0, 0.35]
         calibrate(args)
         return
 

@@ -126,14 +126,30 @@ CONFIG: dict[str, object] = {
     # confident about, and at 17% true noise the odds favour guessing a home
     # for it over declaring it unclusterable.
     #
+    # Measured against a perfect noise detector on calibrated rounds, the three
+    # shapes ceiling at 1.000 (bucket), 0.827 (singleton) and 0.810 (reclaim).
+    # So a bucket is worth far more than anything else *if* the points in it
+    # really are the ground truth's noise, and is the worst thing to do if they
+    # are not: a bucket of 1250 points drawn from 40 different clusters is the
+    # largest single source of false pairs available. That gap between reward
+    # and risk is what "graded" exists for -- bucket the points the outlier
+    # score is most sure about, make singletons of the rest, and the two knobs
+    # below place the cut without betting everything on the detector.
+    #
     # "bucket"    - one shared id, mirroring ground truth's single -1 group
     # "singleton" - a unique id per point: contributes no pairs at all
     # "none"      - push rejects back into their nearest cluster
+    # "graded"    - the most noise-like `noise_bucket_frac` share into one
+    #               bucket, the remainder as singletons
     "noise_mode": "none",
     # Extra points promoted to noise beyond the clusterer's own rejects, as a
-    # fraction of n. 0 trusts the clusterer, which measures better than the
-    # previous submission's hand-tuned 20-40%.
+    # fraction of n. 0 trusts the clusterer. The top submissions all eject a
+    # large share by hand (25% on social, 40% on titles) rather than trusting
+    # it, so this is swept against them rather than assumed.
     "extra_noise_frac": 0.0,
+    # Under "graded", the share of the noise set that goes to the shared bucket
+    # instead of becoming singletons, taken most-noise-like first.
+    "noise_bucket_frac": 0.5,
 
     # Rejected points whose cosine to a real centroid clears this threshold are
     # reclaimed into that cluster instead of going to the bucket. 0 disables.
@@ -1092,11 +1108,18 @@ def assign_noise(labels: np.ndarray, Z: np.ndarray, sids: np.ndarray,
     out = labels.copy()
     extra = float(opt("extra_noise_frac", is_titles))
 
+    # Ranks how noise-like each point is. Computed before anything is ejected,
+    # because the score leans on each point's distance to its own centroid and
+    # that is only defined while the point still has a cluster.
+    ranking = None
+    if extra > 0 or mode == "graded":
+        ranking = outlier_score(Z, out)
+
     if extra > 0:
         n = out.size
         count = int(n * extra)
         if count > 0:
-            score = outlier_score(Z, out)
+            score = ranking.copy()
             score[sids > 0] = -1.0  # foreign script is handled by the merge step
             score[out == NOISE_LABEL] = -1.0
             eligible = int((score >= 0).sum())
@@ -1136,6 +1159,16 @@ def assign_noise(labels: np.ndarray, Z: np.ndarray, sids: np.ndarray,
     base = int(out.max()) + 1 if (out != NOISE_LABEL).any() else 0
     if mode == "singleton":
         out[rejected] = np.arange(base, base + int(rejected.sum()))
+        return out
+
+    if mode == "graded":
+        where = np.flatnonzero(rejected)
+        share = float(opt("noise_bucket_frac", is_titles))
+        keep = int(round(len(where) * min(max(share, 0.0), 1.0)))
+        order = where[np.argsort(-ranking[where], kind="stable")]
+        out[order[:keep]] = base
+        rest = order[keep:]
+        out[rest] = np.arange(base + 1, base + 1 + len(rest))
         return out
     # "bucket": one shared id. Emit a real id rather than -1 so the label is
     # unambiguous to the scorer.
