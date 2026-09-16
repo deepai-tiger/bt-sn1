@@ -42,10 +42,10 @@ from pathlib import Path
 
 import numpy as np
 from scipy.linalg import cho_factor, cho_solve
+from scipy.sparse import hstack as sparse_hstack
 from sklearn.cluster import MiniBatchKMeans
 from sklearn.feature_extraction.text import HashingVectorizer
 from sklearn.preprocessing import normalize
-from scipy.sparse import hstack as sparse_hstack
 
 DISTILL_DIR = Path("/tmp/sn1_distill")
 SUBMISSION = Path(__file__).parent.parent / "champion-code" / "code_submission_v1.py"
@@ -369,7 +369,6 @@ def main() -> None:
         with np.load(cache) as data:
             gram, rhs_full = data["gram"], data["rhs"]
             X_probe, Y_probe = data["x_probe"], data["y_probe"]
-        probe_is_sparse = False
     else:
         clean_text = load_clean_text()
         print("loading encoded corpus")
