@@ -44,10 +44,10 @@ uv pip install --python /tmp/venv/bin/python \
     numpy==2.3.5 scikit-learn==1.6.1 fastapi==0.124.2 uvicorn==0.38.0 \
     pydantic==2.12.5 pyarrow
 
-# ground-truth env
+# ground-truth env (needs torch, so keep it separate)
 uv venv /tmp/gtvenv --python 3.12
 uv pip install --python /tmp/gtvenv/bin/python \
-    sentence-transformers umap-learn scikit-learn "numpy<2.4"
+    sentence-transformers umap-learn scikit-learn "numpy<2.4" pyarrow
 ```
 
 ## Usage
@@ -64,6 +64,24 @@ uv pip install --python /tmp/gtvenv/bin/python \
 
 # 4. Compare strategy variants
 /tmp/venv/bin/python harness/sweep.py --experiment noise_mode
+/tmp/venv/bin/python harness/grid.py --spec harness/specs/titles_c.json --subset arxiv
+```
+
+### Rebuilding the distilled embedding
+
+The one baked artefact in the submission. Encoding is the slow part (~25
+minutes on 4 CPU cores); the fit caches its normal equations, so tuning
+`--dims`, `--alpha`, `--subspaces` and `--prune` afterwards costs ~25s a go.
+
+```bash
+/tmp/gtvenv/bin/python harness/distill_encode.py            # MiniLM targets
+/tmp/venv/bin/python harness/distill_fit.py --dims 32 --subspaces 8 \
+    --prune 0.5 --alpha 0.2 --word 6144 --char 2048         # fit and pack
+/tmp/venv/bin/python harness/grid.py --spec harness/specs/distilled_w.json \
+    --subset arxiv --blob /tmp/sn1_distill/blob.txt         # A/B before baking
+/tmp/venv/bin/python harness/embed_blob.py /tmp/sn1_distill/blob.txt
+/tmp/venv/bin/python harness/test_blob.py                   # format round trip
+/tmp/venv/bin/python harness/minify.py                      # check the limit
 ```
 
 ## Files
@@ -74,16 +92,57 @@ uv pip install --python /tmp/gtvenv/bin/python \
 | `make_rounds.py` | assembles topically structured subsets and bakes ground truth with the real pipeline |
 | `score.py` | the competition metric: `(max(0, ARI) + NMI) / 2` |
 | `evaluate.py` | imports a submission's `cluster_texts` and scores it across all rounds |
-| `sweep.py` | overrides `CONFIG` in the submission to A/B strategy choices |
+| `sweep.py` | prepared A/B experiments over `CONFIG` |
+| `grid.py` | runs a JSON list of `CONFIG` overrides; can inject a candidate blob with `--blob` |
+| `probe.py` | single-variant run, for quick one-offs |
+| `specs/` | grid specs, one file per question asked |
+| `distill_encode.py` | encodes the corpus with MiniLM to produce regression targets |
+| `distill_fit.py` | solves and packs the distilled embedding |
+| `embed_blob.py` | writes a trained blob into `DISTILLED_BLOB` |
+| `test_blob.py` | round-trips the packer against the submission's unpacker |
+| `minify.py` | builds the submission-sized copy and checks the character limit |
 | `reference_champion.py` | readable reconstruction of the 4th-place submission, used as the A/B baseline |
 
-## Two things the harness cannot reproduce
+## Where the ceiling is
 
-**The distilled embedding.** The champion's two `lzma` blobs (`Ak`, `BD`) were
-blanked to `'AAA'` and `''` in the CLI export, so roughly 31k characters of
-quantized projection-matrix weights are gone. Both `reference_champion.py` and
-the current submission run without them, which makes the A/B fair but means
-local absolute scores sit well below the platform's 0.405.
+`diagnose.py` answers the question that decides what is worth working on. It
+assigns every point to whichever *ground-truth* cluster has the nearest
+centroid in the submission's own feature space -- the best any clusterer could
+do with these features if it were handed the true cluster locations for free:
+
+| | pipeline | oracle | kmeans(true k) | ward(true k) |
+|---|---|---|---|---|
+| social subset | **0.418** | 0.417 | 0.376 | 0.392 |
+| arXiv subset | **0.288** | 0.260 | 0.248 | 0.243 |
+
+The pipeline already matches the oracle on social text and beats it on titles.
+It can do that because the metric rewards output *shape* -- the noise bucket,
+the granularity -- and not only correct assignment, which the oracle gets right
+by construction.
+
+The consequence is worth being explicit about: **clustering is not the
+bottleneck, the feature space is.** This is consistent with the hyperparameter
+searches, where all 13 social variants land within +/-0.005 of the default.
+Cluster ensembles, better cut selection and alternative linkages all have a
+ceiling of roughly where the submission already sits. The only lever with room
+left is representation quality, which means a higher-fidelity distilled
+embedding (currently reproducing 53% of MiniLM's pairwise geometry).
+
+## What the harness cannot reproduce
+
+**The platform's own distilled embedding.** The champion's two `lzma` blobs
+(`Ak`, `BD`) were blanked to `'AAA'` and `''` in the CLI export, so roughly 31k
+characters of quantized projection-matrix weights are gone.
+`reference_champion.py` runs without them, which is why it scores 0.281 here
+against the platform's reported 0.405 -- the A/B against it is fair, but it is
+not a like-for-like reconstruction of the real submission's score. The current
+submission ships its own blob, retrained from scratch (see `distill_fit.py`).
+
+**The exact embedding model.** The competition says "sentence-transformer"
+without naming one. This assumes `all-MiniLM-L6-v2`, by far the most common
+default. If the platform uses something else, the distilled embedding is
+distilled from the wrong teacher -- though sentence-embedding spaces correlate
+strongly enough that it should still carry most of its value.
 
 **Sandbox speed.** This VM runs the same pipeline in roughly half the wall time
 the platform recorded (10.7s here vs 21.8s there). Treat local timings as

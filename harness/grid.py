@@ -79,6 +79,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--spec", type=Path, required=True)
     parser.add_argument("--subset", action="append", default=None)
+    parser.add_argument("--rounds-dir", type=Path, default=ROUNDS_DIR)
     parser.add_argument("--submission", type=Path, default=SUBMISSION)
     parser.add_argument("--blob", type=Path, default=None,
                         help="candidate distilled-embedding blob to inject")
@@ -97,11 +98,11 @@ def main() -> None:
             module.CONFIG[key] = json.loads(value)
         print(f"base overrides: {args.base}")
 
-    files = sorted(ROUNDS_DIR.glob("round_*_subset_*.json"))
+    files = sorted(args.rounds_dir.glob("round_*_subset_*.json"))
     if args.subset:
         files = [f for f in files if any(s in f.stem for s in args.subset)]
     if not files:
-        raise SystemExit("no rounds matched")
+        raise SystemExit(f"no rounds matched in {args.rounds_dir}")
     rounds = [json.loads(f.read_text()) for f in files]
     print(f"{len(rounds)} subsets, {len(variants)} variants\n")
     print(f"{'variant':<34} {'mean':>7} {'ari':>7} {'nmi':>7} {'secs':>6} "

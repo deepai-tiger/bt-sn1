@@ -1,0 +1,15 @@
+{
+  "base": {},
+  "lsa320": {"lsa_dim": 320},
+  "ppmi192": {"ppmi_dim": 192},
+  "both_big": {"lsa_dim": 320, "ppmi_dim": 192},
+  "reduce120": {"reduce_dim": 120},
+  "reduce40": {"reduce_dim": 40},
+  "smooth12": {"smooth_iters": 12},
+  "smooth_a35": {"smooth_alpha": 0.35},
+  "smooth_k20": {"smooth_k": 20},
+  "minsamp10": {"hdbscan_min_samples": 10},
+  "minsamp20": {"hdbscan_min_samples": 20},
+  "char_w7": {"char_weight": 0.7},
+  "drop2": {"drop_components": 2}
+}

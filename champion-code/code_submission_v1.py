@@ -185,7 +185,11 @@ CONFIG: dict[str, object] = {
     "title_w_distilled": 2.0,
     "title_smooth_k": 35,
     "title_smooth_alpha": 0.3,
-    "title_smooth_iters": 6,
+    # 6 iterations measured better on the tuning rounds (+0.003) and worse on
+    # the held-out ones (-0.005). Left at 2: with the noise mode and the blob
+    # weight both re-tuned on three arXiv subsets, this is where overfitting
+    # would show up first.
+    "title_smooth_iters": 2,
     "title_drop_components": 2,
     "title_spectral_knn": 25,
     "title_min_cluster_size": 25,
