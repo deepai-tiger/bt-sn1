@@ -29,11 +29,21 @@ ROUNDS_DIR = Path("/tmp/sn1_rounds")
 SUBMISSION = Path(__file__).parent.parent / "champion-code" / "code_submission_v1.py"
 
 
-def load_submission(path: Path):
+def load_submission(path: Path, blob: Path | None = None):
     spec = importlib.util.spec_from_file_location("submission_under_test", path)
     module = importlib.util.module_from_spec(spec)
     sys.modules["submission_under_test"] = module
     spec.loader.exec_module(module)
+    if blob is not None:
+        # Inject a candidate distilled embedding without editing the source, so
+        # a blob can be A/B'd before it is baked in.
+        module.DISTILLED_BLOB = blob.read_text(encoding="utf-8").strip()
+        module._DISTILLED_CACHE = None
+        if module.load_distilled() is None:
+            raise SystemExit(f"{blob} did not decode")
+        matrix, word, char = module.load_distilled()
+        print(f"blob: {matrix.shape} over {word}+{char} buckets "
+              f"({len(module.DISTILLED_BLOB):,} characters)")
     return module
 
 
@@ -70,11 +80,22 @@ def main() -> None:
     parser.add_argument("--spec", type=Path, required=True)
     parser.add_argument("--subset", action="append", default=None)
     parser.add_argument("--submission", type=Path, default=SUBMISSION)
+    parser.add_argument("--blob", type=Path, default=None,
+                        help="candidate distilled-embedding blob to inject")
+    parser.add_argument("--base", action="append", default=None,
+                        metavar="KEY=JSON", help="override applied to every variant")
     parser.add_argument("--json-out", type=Path, default=None)
     args = parser.parse_args()
 
     variants: dict[str, dict] = json.loads(args.spec.read_text())
-    module = load_submission(args.submission)
+    module = load_submission(args.submission, args.blob)
+    if args.base:
+        for item in args.base:
+            key, _, value = item.partition("=")
+            if key not in module.CONFIG:
+                raise SystemExit(f"unknown config key {key!r}")
+            module.CONFIG[key] = json.loads(value)
+        print(f"base overrides: {args.base}")
 
     files = sorted(ROUNDS_DIR.glob("round_*_subset_*.json"))
     if args.subset:

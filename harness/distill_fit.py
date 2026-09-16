@@ -173,6 +173,24 @@ def quantize_magnitudes(norms: np.ndarray):
     return codes, levels
 
 
+def prune_rows(W: np.ndarray, fraction: float) -> np.ndarray:
+    """Zero the `fraction` of rows with the smallest norm.
+
+    Hash buckets have wildly uneven importance: most correspond to n-grams
+    that barely occur, and their rows contribute almost nothing to any
+    document embedding. Zeroing them is close to free in accuracy and buys a
+    lot of budget, because identical all-zero code and magnitude bytes are
+    exactly what the compressor is good at.
+    """
+    if fraction <= 0:
+        return W
+    norms = np.linalg.norm(W, axis=1)
+    cutoff = float(np.quantile(norms, fraction))
+    out = W.copy()
+    out[norms <= cutoff] = 0.0
+    return out
+
+
 def quantize_pq(W: np.ndarray, subspaces: int, n_prototypes: int = 256,
                 seed: int = 0):
     """Product-quantize the rows of W: direction by PQ, magnitude at 8 bits.
@@ -204,10 +222,15 @@ def quantize_pq(W: np.ndarray, subspaces: int, n_prototypes: int = 256,
     codes = np.zeros((W.shape[0], subspaces), np.uint8)
     for block in range(subspaces):
         chunk = directions[:, block * width:(block + 1) * width]
+        # Prototypes are learned from the rows that actually carry weight;
+        # pruned rows would otherwise pull a large share of the codebook onto
+        # the origin, which no real row needs.
         km = MiniBatchKMeans(n_clusters=n_prototypes, random_state=seed + block,
                              n_init=5, batch_size=4096, max_iter=200)
-        codes[:, block] = km.fit_predict(chunk).astype(np.uint8)
+        km.fit(chunk[keep] if keep.any() else chunk)
+        codes[:, block] = km.predict(chunk).astype(np.uint8)
         books[block] = km.cluster_centers_.astype(np.float32)
+    codes[~keep] = 0
 
     mag_codes, levels = quantize_magnitudes(norms)
     recon = np.concatenate(
@@ -326,6 +349,8 @@ def main() -> None:
     parser.add_argument("--alpha", type=float, default=0.05)
     parser.add_argument("--subspaces", type=int, default=4)
     parser.add_argument("--prototypes", type=int, default=256)
+    parser.add_argument("--prune", type=float, default=0.0,
+                        help="fraction of lowest-norm rows to zero")
     parser.add_argument("--reddit", type=int, default=70000)
     parser.add_argument("--tweets", type=int, default=70000)
     parser.add_argument("--arxiv", type=int, default=60000)
@@ -387,6 +412,9 @@ def main() -> None:
     print(f"solving ridge (alpha={args.alpha}, dims={args.dims})")
     W = solve_ridge(gram, rhs_full[:, :args.dims], args.alpha)
     print(f"  W {W.shape}")
+    if args.prune > 0:
+        W = prune_rows(W, args.prune)
+        print(f"  pruned {args.prune:.0%} of rows by norm")
 
     print(f"product-quantizing rows: {args.subspaces} subspaces x "
           f"{args.prototypes} prototypes")
@@ -416,7 +444,7 @@ def main() -> None:
     args.out.write_text(text, encoding="utf-8")
     meta = {"dims": args.dims, "word": args.word, "char": args.char,
             "subspaces": args.subspaces, "prototypes": args.prototypes,
-            "chars": len(text), **fidelity}
+            "prune": args.prune, "chars": len(text), **fidelity}
     (args.out.with_suffix(".meta.json")).write_text(repr(meta))
     print(f"wrote {args.out}")
 

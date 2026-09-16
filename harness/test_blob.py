@@ -43,6 +43,25 @@ def check_char_packing() -> None:
     print("char packing: ok")
 
 
+def check_trailing_pad_tolerance() -> None:
+    """Packing rounds up to whole codepoints, so the decoder is handed padding.
+
+    Every compressed length whose bit count is not a multiple of 15 -- fourteen
+    out of fifteen of them -- produces a trailing pad byte. `lzma.decompress`
+    treats that as a corrupt stream and the failure is silent, so this is
+    checked across sizes rather than trusting whichever one got baked in.
+    """
+    module = load_submission()
+    rng = np.random.default_rng(3)
+    for size in (100, 1000, 9999, 24596):
+        raw = rng.integers(0, 256, size=size, dtype=np.uint8).tobytes()
+        packed = lzma.compress(raw, preset=9 | lzma.PRESET_EXTREME)
+        recovered = module._unpack_blob(fit.encode_chars(packed))
+        assert lzma.LZMADecompressor().decompress(recovered) == raw, \
+            f"pad byte broke decompression at {size} bytes"
+    print("trailing pad tolerance: ok")
+
+
 def check_matrix_round_trip() -> None:
     """Full path: a random matrix through quantize -> serialize -> decode."""
     rng = np.random.default_rng(2)
@@ -92,6 +111,7 @@ def check_absent_blob() -> None:
 
 if __name__ == "__main__":
     check_char_packing()
+    check_trailing_pad_tolerance()
     check_matrix_round_trip()
     check_absent_blob()
     print("all blob format checks passed")

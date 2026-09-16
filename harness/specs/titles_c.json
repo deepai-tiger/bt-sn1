@@ -1,0 +1,22 @@
+{
+  "bucket_base": {},
+  "spec5":  {"title_reduce_dim": 5},
+  "spec8":  {"title_reduce_dim": 8},
+  "spec16": {"title_reduce_dim": 16},
+  "smooth4": {"title_smooth_iters": 4},
+  "smooth6": {"title_smooth_iters": 6},
+  "smooth10": {"title_smooth_iters": 10},
+  "minsamp_auto": {"hdbscan_min_samples": null},
+  "mcs18": {"title_min_cluster_size": 18},
+  "mcs35": {"title_min_cluster_size": 35},
+  "mcs50": {"title_min_cluster_size": 50},
+  "w_dist1": {"title_w_distilled": 1.0},
+  "w_dist3": {"title_w_distilled": 3.0},
+  "w_dist6": {"title_w_distilled": 6.0},
+  "reclaim70": {"title_noise_reclaim_thr": 0.7},
+  "reclaim50": {"title_noise_reclaim_thr": 0.5},
+  "small_merge": {"small_cluster_mode": "merge"},
+  "spec5_smooth6_msauto": {"title_reduce_dim": 5, "title_smooth_iters": 6, "hdbscan_min_samples": null},
+  "spec5_msauto": {"title_reduce_dim": 5, "hdbscan_min_samples": null},
+  "spec8_smooth6": {"title_reduce_dim": 8, "title_smooth_iters": 6}
+}

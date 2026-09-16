@@ -1,0 +1,9 @@
+{
+  "w_off":  {"w_distilled": 0.0},
+  "w_0.5":  {"w_distilled": 0.5},
+  "w_1.0":  {"w_distilled": 1.0},
+  "w_2.0":  {"w_distilled": 2.0},
+  "w_4.0":  {"w_distilled": 4.0},
+  "w_8.0":  {"w_distilled": 8.0},
+  "w_only": {"w_distilled": 4.0, "w_lsa": 0.0, "w_ppmi": 0.0, "title_w_lsa": 0.0, "title_w_ppmi": 0.0}
+}
