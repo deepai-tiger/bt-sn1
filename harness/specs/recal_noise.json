@@ -1,0 +1,12 @@
+{
+  "base (bucket)":        {},
+  "singleton":            {"noise_mode": "singleton"},
+  "none (reclaim all)":   {"noise_mode": "none"},
+  "bucket+reclaim0.5":    {"noise_reclaim_thr": 0.5},
+  "singleton+extra0.2":   {"noise_mode": "singleton", "extra_noise_frac": 0.2},
+  "bucket+extra0.2":      {"extra_noise_frac": 0.2},
+  "mcs18":                {"min_cluster_size": 18},
+  "mcs32":                {"min_cluster_size": 32},
+  "small_merge":          {"small_cluster_mode": "merge"},
+  "small_none":           {"small_cluster_mode": "none"}
+}

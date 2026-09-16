@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 import lzma
 import sys
 from pathlib import Path
@@ -85,7 +86,23 @@ def hashed_features(docs: list[str], word_buckets: int, char_buckets: int):
     return normalize(block)
 
 
-def load_corpus(limits: dict[str, int], seed: int):
+def evaluation_texts(dirs: list[Path]) -> set[str]:
+    """Every text any evaluation round uses.
+
+    The blob predicts the quantity the ground truth is derived from, so
+    training it on the texts it is scored on inflates the result. Corpus and
+    rounds are drawn from the same pools, so without this the overlap is
+    total. Filtering here rather than at encode time means re-cutting the
+    rounds does not cost another 12-minute encode.
+    """
+    seen: set[str] = set()
+    for directory in dirs:
+        for path in sorted(directory.glob("round_*_subset_*.json")):
+            seen.update(json.loads(path.read_text())["texts"])
+    return seen
+
+
+def load_corpus(limits: dict[str, int], seed: int, exclude: set[str]):
     texts: list[str] = []
     targets: list[np.ndarray] = []
     for name, cap in limits.items():
@@ -99,6 +116,12 @@ def load_corpus(limits: dict[str, int], seed: int):
         with np.load(path, allow_pickle=True) as data:
             rows = data["texts"]
             emb = data["embeddings"]
+        if exclude:
+            keep = np.fromiter((str(t) not in exclude for t in rows), bool, len(rows))
+            dropped = int((~keep).sum())
+            if dropped:
+                print(f"  {name}: dropping {dropped} texts held by rounds")
+            rows, emb = rows[keep], emb[keep]
         if len(rows) > cap:
             pick = np.random.default_rng(seed).choice(len(rows), cap, replace=False)
             rows, emb = rows[pick], emb[pick]
@@ -370,6 +393,8 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--out", type=Path, default=Path("/tmp/sn1_distill/blob.txt"))
     parser.add_argument("--cache", type=Path, default=None)
+    parser.add_argument("--rounds-dir", action="append", type=Path, default=None,
+                        help="round directories whose texts must not be trained on")
     parser.add_argument("--refit", action="store_true",
                         help="ignore any cached normal equations")
     parser.add_argument("--compare-scalar", action="store_true")
@@ -384,9 +409,12 @@ def main() -> None:
             X_probe, Y_probe = data["x_probe"], data["y_probe"]
     else:
         clean_text = load_clean_text()
+        rounds = args.rounds_dir or [Path("/tmp/sn1_rounds"), Path("/tmp/sn1_holdout")]
+        exclude = evaluation_texts([d for d in rounds if d.exists()])
+        print(f"holding out {len(exclude)} texts used by evaluation rounds")
         print("loading encoded corpus")
         texts, Y = load_corpus({"reddit": args.reddit, "tweets": args.tweets,
-                                "arxiv": args.arxiv}, args.seed)
+                                "arxiv": args.arxiv}, args.seed, exclude)
         print(f"  {len(texts)} texts, target {Y.shape}")
 
         print("projecting target to PCA basis (no whitening preserves inner products)")

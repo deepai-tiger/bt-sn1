@@ -1,20 +1,39 @@
-"""Build evaluation rounds with ground truth from a local replica of the platform pipeline.
+"""Build evaluation rounds with ground truth from a replica of the platform pipeline.
 
-The competition bakes ground truth with `sentence-transformer -> UMAP -> HDBSCAN`.
-Reproducing that offline is what makes submission changes measurable without
-burning the 4-submissions-per-day rate limit.
+The competition bakes ground truth with `sentence-transformer -> UMAP ->
+HDBSCAN`. Reproducing that offline is what makes submission changes measurable
+without burning the four-submissions-per-day limit.
 
-`min_cluster_size=25` is not a guess: every subset in
-`champion-code/metadata.json` reports a minimum ground-truth cluster size of
-25-27, which pins it.
+Getting the *pipeline* right is not enough, and that is the lesson that cost a
+submission. An earlier version of this file sampled subsets as a mixture of
+broad topical slices, which baked to 41-54 clusters at 26-39% noise on social
+and 21-29 clusters at 40-42% on arXiv. The platform reports 34-49 clusters at
+13-22% and 39-41 at 26-29%. Tuning against rounds a third of whose points were
+one big noise label rewarded exactly the wrong behaviour -- lump aggressively,
+cut coarsely -- and the submission that won locally by 0.10 lost on the
+platform by 0.10.
 
-Subsets are assembled as a mixture of topical slices plus a random tail,
-because Gravity tasks crawl specified topics. A uniform social sample is too
-semantically homogeneous -- the real pipeline collapses it into a single
-5000-point blob, which looks nothing like the 34-44 clusters with 13-29% noise
-the platform reports.
+Two things had to change:
 
-Run with the ground-truth venv, not the submission venv:
+* **Slices are focused, not broad.** A subset is built from `n_topics` slices,
+  each the nearest neighbours of a random seed post in embedding space. That
+  is what crawling a topic actually returns, and it is the only way to get
+  clusters the real pipeline keeps 83% of. A subreddit is not a topic; it is
+  dozens of them.
+* **arXiv is structured too.** It used to be a plain random sample over 154
+  categories, which is diffuse enough that HDBSCAN discards 40% of it. The
+  platform's arXiv subsets are no noisier than 29%, so they are not random
+  samples either.
+
+Both sources of texts reuse the MiniLM embeddings cached under
+`/tmp/sn1_distill` by `distill_encode.py`, so assembling a subset and baking
+its ground truth needs no re-encoding -- about 40s a subset, which is what
+makes calibrating the shape knobs affordable.
+
+    # find knobs that reproduce the platform's reported shape
+    /tmp/gtvenv/bin/python harness/make_rounds.py --calibrate
+
+    # then write rounds with them
     /tmp/gtvenv/bin/python harness/make_rounds.py --rounds 3
 """
 
@@ -23,154 +42,184 @@ from __future__ import annotations
 import argparse
 import json
 import random
-from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
 
-CORPUS_DIR = Path("/tmp/sn1_corpus")
+DISTILL_DIR = Path("/tmp/sn1_distill")
 ROUNDS_DIR = Path("/tmp/sn1_rounds")
 
 SAMPLE_SIZE = 5000
-MIN_CLUSTER_SIZE = 25
-EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+MIN_CLUSTER_SIZE = 25          # pinned: every reported subset has min 25-27
 
-# Reproduces the reported ground-truth shape: ~40 clusters, a long tail of
-# sizes (median 53-75, max 252-907), and 13-29% unclustered noise.
-TOPICS_PER_SUBSET = 46
-TAIL_FRACTION = 0.11
-MIN_SLICE = 30
-MAX_SLICE = 700
+# Mean over the eight subsets in champion-code/metadata*.json, the only direct
+# observation of the real pipeline's output we have.
+TARGET = {
+    "social": {"clusters": 39.8, "noise_frac": 0.168},
+    "arxiv": {"clusters": 40.0, "noise_frac": 0.276},
+}
+
+# Calibrated against TARGET; see --calibrate. Deliberately central rather than
+# argmax: a single seed draw swings the baked shape a long way (n_topics 35 vs
+# 40 at the same tail and spread gave 22 clusters at 2% noise against 41 at
+# 15%), so the argmax cell is mostly luck. What matters is that the *aggregate*
+# over a round set lands on TARGET, and that individual subsets scatter around
+# it the way the platform's own do -- its social subsets run 13-22% noise.
+SHAPE = {
+    "social": {"n_topics": 42, "tail_frac": 0.16, "spread": 2.0,
+               "min_samples": None},
+    "arxiv": {"n_topics": 48, "tail_frac": 0.18, "spread": 4.0,
+              "min_samples": None},
+}
 
 
-def load_jsonl(path: Path) -> list[dict]:
-    if not path.exists():
-        return []
-    with path.open(encoding="utf-8") as fh:
-        return [json.loads(line) for line in fh]
-
-
-def by_topic(rows: list[dict], min_rows: int) -> dict[str, list[str]]:
-    groups: dict[str, list[str]] = defaultdict(list)
-    for row in rows:
-        groups[row["topic"]].append(row["text"])
-    return {k: v for k, v in groups.items() if len(v) >= min_rows}
+def load_pool(names: list[str]) -> tuple[np.ndarray, np.ndarray]:
+    """Texts plus their MiniLM embeddings, concatenated over sources."""
+    texts: list[np.ndarray] = []
+    embeddings: list[np.ndarray] = []
+    for name in names:
+        path = DISTILL_DIR / f"{name}.npz"
+        if not path.exists():
+            raise SystemExit(f"missing {path}; run harness/distill_encode.py first")
+        with np.load(path, allow_pickle=True) as data:
+            texts.append(data["texts"])
+            embeddings.append(data["embeddings"].astype(np.float32))
+    pool_texts = np.concatenate(texts)
+    pool_emb = np.concatenate(embeddings)
+    pool_emb /= np.linalg.norm(pool_emb, axis=1, keepdims=True) + 1e-12
+    return pool_texts, pool_emb
 
 
 def zipf_sizes(n_topics: int, total: int, rng: random.Random) -> list[int]:
-    """Skewed slice sizes so the subset has a few large topics and many small ones."""
+    """A few large slices and many small ones, as the reported size spread shows.
+
+    The platform's subsets run to a median near 68 with a maximum in the
+    hundreds, so slice sizes cannot be uniform.
+    """
     weights = [1.0 / (i + 1.6) ** 0.85 for i in range(n_topics)]
     rng.shuffle(weights)
     scale = total / sum(weights)
-    sizes = [int(max(MIN_SLICE, min(MAX_SLICE, round(w * scale)))) for w in weights]
-    return sizes
+    return [max(30, int(round(w * scale))) for w in weights]
 
 
-def build_social_subset(reddit: dict[str, list[str]], tweets: dict[str, list[str]],
-                        n: int, rng: random.Random,
-                        used: set[str]) -> tuple[list[str], list[str]]:
-    """Mix Reddit and X topical slices so the median length lands in the observed
-    230-330 character band, then dilute with an off-topic tail."""
-    reddit_share = 0.62
+def focused_slice(pool_emb: np.ndarray, seed: int, size: int, spread: float,
+                  taken: np.ndarray, rng: random.Random) -> np.ndarray:
+    """The neighbourhood of one seed post: what crawling a topic returns.
 
-    n_topics = TOPICS_PER_SUBSET
-    target_core = int(n * (1.0 - TAIL_FRACTION))
-    sizes = zipf_sizes(n_topics, target_core, rng)
+    `spread` widens the candidate neighbourhood before subsampling, which is
+    the knob that trades cluster tightness against how much of the slice the
+    ground-truth pipeline is willing to keep. At 1.0 the slice is the seed's
+    `size` nearest neighbours and bakes almost noise-free; larger values mix
+    in the fringe of the topic and push the noise share up toward what the
+    platform reports.
+    """
+    width = int(min(len(pool_emb), max(size, size * spread)))
+    similarity = pool_emb @ pool_emb[seed]
+    similarity[taken] = -2.0
+    candidates = np.argpartition(-similarity, width - 1)[:width]
+    candidates = candidates[similarity[candidates] > -2.0]
+    if len(candidates) <= size:
+        return candidates
+    return np.asarray(rng.sample(list(candidates), size))
 
-    # The champion's router branches hard at a *preprocessed* median length of
-    # 230 characters, and the real rounds sit inside its 230-330 window (all
-    # three social subsets in metadata.json emit 1026 = 1000 singletons + 26
-    # clusters, which only that branch produces). Preprocessing strips URLs,
-    # mentions and punctuation, costing roughly 15% of the raw length, so aim
-    # for a raw median near 310 to land inside the window.
-    reddit = {k: [t for t in v if 160 <= len(t) <= 1200] for k, v in reddit.items()}
-    tweets = {k: [t for t in v if 120 <= len(t) <= 400] for k, v in tweets.items()}
-    candidates = [("reddit", k) for k in reddit if len(reddit[k]) >= MIN_SLICE] + \
-        [("x", k) for k in tweets if len(tweets[k]) >= MIN_SLICE]
-    rng.shuffle(candidates)
 
-    texts: list[str] = []
+def build_subset(pool_texts: np.ndarray, pool_emb: np.ndarray, n: int,
+                 shape: dict, rng: random.Random,
+                 taken: np.ndarray) -> tuple[np.ndarray, list[str]]:
+    n_topics = int(shape["n_topics"])
+    core = int(n * (1.0 - float(shape["tail_frac"])))
+    sizes = zipf_sizes(n_topics, core, rng)
+
+    chosen: list[np.ndarray] = []
     topics: list[str] = []
-    # Reddit-heavy keeps the length mix inside the target window.
-    want_reddit = int(n_topics * reddit_share)
-    taken = {"reddit": 0, "x": 0}
-    quota = {"reddit": want_reddit, "x": n_topics - want_reddit}
-    for source, key in candidates:
-        n_slices = taken["reddit"] + taken["x"]
-        if n_slices >= n_topics:
+    available = np.flatnonzero(~taken)
+    for index, size in enumerate(sizes):
+        if taken.all():
             break
-        if taken[source] >= quota[source]:
+        seed = int(rng.choice(available.tolist()))
+        if taken[seed]:
             continue
-        pool = [t for t in (reddit if source == "reddit" else tweets)[key]
-                if t not in used]
-        if len(pool) < MIN_SLICE:
+        picked = focused_slice(pool_emb, seed, size, float(shape["spread"]),
+                               taken, rng)
+        if len(picked) < 30:
             continue
-        size = min(sizes[n_slices], len(pool))
-        picked = rng.sample(pool, k=size)
-        used.update(picked)
-        texts.extend(picked)
-        topics.extend([key] * size)
-        taken[source] += 1
+        taken[picked] = True
+        chosen.append(picked)
+        topics.extend([f"slice_{index}"] * len(picked))
 
-    # The tail is drawn from topics not represented above, so the ground-truth
-    # pipeline has genuine low-density points to label as noise.
-    tail_need = max(0, n - len(texts))
-    tail_pool: list[str] = []
-    for source, key in candidates:
-        if key in set(topics):
-            continue
-        tail_pool.extend(t for t in (reddit if source == "reddit" else tweets)[key][:40]
-                         if t not in used)
-        if len(tail_pool) > tail_need * 3:
-            break
-    tail = rng.sample(tail_pool, k=min(tail_need, len(tail_pool)))
-    used.update(tail)
-    texts.extend(tail)
-    topics.extend(["<tail>"] * len(tail))
+    # A random tail gives the pipeline genuine low-density points to discard,
+    # which is where a realistic noise share comes from.
+    body = int(sum(len(c) for c in chosen))
+    tail_need = max(0, n - body)
+    if tail_need:
+        rest = np.flatnonzero(~taken)
+        tail = np.asarray(rng.sample(list(rest), min(tail_need, len(rest))))
+        taken[tail] = True
+        chosen.append(tail)
+        topics.extend(["<tail>"] * len(tail))
 
-    order = list(range(len(texts)))
-    rng.shuffle(order)
-    return [texts[i] for i in order], [topics[i] for i in order]
+    indices = np.concatenate(chosen)
+    order = rng.sample(range(len(indices)), len(indices))
+    return indices[order], [topics[i] for i in order]
 
 
-def build_arxiv_subset(arxiv: dict[str, list[str]], n: int, rng: random.Random,
-                       used: set[str]) -> tuple[list[str], list[str]]:
-    """arXiv rounds are a plain random sample of unused titles."""
-    pool = [(k, t) for k, v in arxiv.items() for t in v if t not in used]
-    picked = rng.sample(pool, k=min(n, len(pool)))
-    used.update(t for _, t in picked)
-    return [t for _, t in picked], [k for k, _ in picked]
-
-
-def ground_truth(texts: list[str], seed: int) -> np.ndarray:
-    from sentence_transformers import SentenceTransformer
+def ground_truth(embeddings: np.ndarray, seed: int,
+                 min_samples: int | None = None) -> np.ndarray:
     from sklearn.cluster import HDBSCAN
     from umap import UMAP
 
-    model = SentenceTransformer(EMBED_MODEL)
-    emb = model.encode(texts, batch_size=128, show_progress_bar=False,
-                       normalize_embeddings=True)
     reduced = UMAP(n_neighbors=15, n_components=5, min_dist=0.0,
-                   metric="cosine", random_state=seed).fit_transform(emb)
-    labels = HDBSCAN(min_cluster_size=MIN_CLUSTER_SIZE, metric="euclidean",
+                   metric="cosine", random_state=seed).fit_transform(embeddings)
+    labels = HDBSCAN(min_cluster_size=MIN_CLUSTER_SIZE, min_samples=min_samples,
+                     metric="euclidean",
                      cluster_selection_method="eom").fit_predict(reduced)
     return np.asarray(labels, dtype=np.int64)
 
 
-def stats(labels: np.ndarray) -> dict:
+def describe(labels: np.ndarray) -> dict:
     real = labels[labels >= 0]
-    if real.size:
-        _, sizes = np.unique(real, return_counts=True)
-    else:
-        sizes = np.array([0])
+    sizes = np.unique(real, return_counts=True)[1] if real.size else np.array([0])
     return {
         "num_samples": int(labels.size),
         "num_clusters": int(sizes.size) if real.size else 0,
         "noise_count": int((labels < 0).sum()),
+        "noise_frac": round(float((labels < 0).mean()), 4),
         "cluster_size_min": int(sizes.min()),
         "cluster_size_median": int(np.median(sizes)),
         "cluster_size_max": int(sizes.max()),
     }
+
+
+SOURCES = {"social": ["reddit", "tweets"], "arxiv": ["arxiv"]}
+
+
+def calibrate(args: argparse.Namespace) -> None:
+    for kind in (["social", "arxiv"] if args.kind is None else [args.kind]):
+        pool_texts, pool_emb = load_pool(SOURCES[kind])
+        target = TARGET[kind]
+        print(f"\n{kind}: pool {len(pool_texts)}, target "
+              f"{target['clusters']:.0f} clusters, {target['noise_frac']:.1%} noise")
+        print(f"  {'n_topics':>9}{'tail':>7}{'spread':>8}"
+              f"{'clusters':>10}{'noise':>8}{'median':>8}{'max':>7}{'error':>8}")
+        for n_topics in args.n_topics:
+            for tail in args.tail:
+                for spread in args.spread:
+                    shape = {"n_topics": n_topics, "tail_frac": tail,
+                             "spread": spread}
+                    rng = random.Random(args.seed)
+                    taken = np.zeros(len(pool_texts), bool)
+                    indices, _ = build_subset(pool_texts, pool_emb, args.size,
+                                              shape, rng, taken)
+                    info = describe(ground_truth(pool_emb[indices], args.seed,
+                                                 args.min_samples))
+                    error = (abs(info["num_clusters"] - target["clusters"])
+                             / target["clusters"]
+                             + abs(info["noise_frac"] - target["noise_frac"])
+                             / target["noise_frac"])
+                    print(f"  {n_topics:>9}{tail:>7}{spread:>8}"
+                          f"{info['num_clusters']:>10}{info['noise_frac']:>7.1%}"
+                          f"{info['cluster_size_median']:>8}"
+                          f"{info['cluster_size_max']:>7}{error:>8.3f}", flush=True)
 
 
 def main() -> None:
@@ -180,45 +229,56 @@ def main() -> None:
     parser.add_argument("--size", type=int, default=SAMPLE_SIZE)
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--out", type=Path, default=ROUNDS_DIR)
+    parser.add_argument("--calibrate", action="store_true")
+    parser.add_argument("--kind", choices=("social", "arxiv"), default=None)
+    parser.add_argument("--n-topics", type=int, action="append", default=None)
+    parser.add_argument("--tail", type=float, action="append", default=None)
+    parser.add_argument("--spread", type=float, action="append", default=None)
+    parser.add_argument("--min-samples", type=int, default=None)
     args = parser.parse_args()
 
-    reddit = by_topic(load_jsonl(CORPUS_DIR / "reddit.jsonl"), 15)
-    tweets = by_topic(load_jsonl(CORPUS_DIR / "tweets.jsonl"), 15)
-    arxiv = by_topic(load_jsonl(CORPUS_DIR / "arxiv.jsonl"), 1)
-    print(f"usable topics: reddit={len(reddit)} x={len(tweets)} arxiv={len(arxiv)}")
+    if args.calibrate:
+        args.n_topics = args.n_topics or [30, 40, 50]
+        args.tail = args.tail or [0.08, 0.16]
+        args.spread = args.spread or [1.5, 2.5, 4.0]
+        calibrate(args)
+        return
 
     args.out.mkdir(parents=True, exist_ok=True)
-    # Rounds are disjoint by construction on the platform; emulate that with a
-    # single `used` set spanning every subset we generate.
-    used: set[str] = set()
+    pools = {kind: load_pool(names) for kind, names in SOURCES.items()}
+    # Rounds are disjoint on the platform; one `taken` mask per pool spanning
+    # every subset we generate emulates that.
+    taken = {kind: np.zeros(len(texts), bool) for kind, (texts, _) in pools.items()}
 
-    for r in range(args.start_round, args.start_round + args.rounds):
-        for idx in (1, 2, 3, "arxiv"):
-            name = f"round_{r:04d}_subset_{idx}"
+    for kind, (texts, _) in pools.items():
+        for path in sorted(args.out.glob("round_*_subset_*.json")):
+            existing = set(json.loads(path.read_text())["texts"])
+            if existing:
+                taken[kind] |= np.isin(texts, list(existing))
+
+    for round_index in range(args.start_round, args.start_round + args.rounds):
+        for subset in (1, 2, 3, "arxiv"):
+            name = f"round_{round_index:04d}_subset_{subset}"
             path = args.out / f"{name}.json"
             if path.exists():
                 print(f"{name}: exists, skipping")
-                payload = json.loads(path.read_text())
-                used.update(payload["texts"])
                 continue
-            rng = random.Random(args.seed * 1000 + r * 10 + (0 if idx == "arxiv" else idx))
-            if idx == "arxiv":
-                texts, topics = build_arxiv_subset(arxiv, args.size, rng, used)
-            else:
-                texts, topics = build_social_subset(reddit, tweets, args.size, rng, used)
-            if len(texts) < args.size * 0.9:
-                print(f"{name}: only {len(texts)} texts available, skipping")
-                continue
-
-            lengths = np.array([len(t) for t in texts])
-            print(f"{name}: n={len(texts)} median_len={np.median(lengths):.0f} "
-                  f"slices={len(set(topics))} -> ground truth ...", flush=True)
-            labels = ground_truth(texts, seed=args.seed)
-            info = stats(labels)
-            print(f"  {info}", flush=True)
+            kind = "arxiv" if subset == "arxiv" else "social"
+            pool_texts, pool_emb = pools[kind]
+            rng = random.Random(args.seed * 1000 + round_index * 10
+                                + (0 if subset == "arxiv" else subset))
+            indices, topics = build_subset(pool_texts, pool_emb, args.size,
+                                           SHAPE[kind], rng, taken[kind])
+            labels = ground_truth(pool_emb[indices], args.seed,
+                                  SHAPE[kind]["min_samples"])
+            info = describe(labels)
+            print(f"{name}: {info}", flush=True)
             path.write_text(json.dumps({
-                "name": name, "texts": texts, "labels": labels.tolist(),
-                "sampling_topics": topics, "stats": info,
+                "name": name,
+                "texts": [str(t) for t in pool_texts[indices]],
+                "labels": labels.tolist(),
+                "sampling_topics": topics,
+                "stats": info,
             }))
 
 
