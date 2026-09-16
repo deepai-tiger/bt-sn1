@@ -86,15 +86,23 @@ SHAPE = {
     # platform maximum of 907. Requiring seeds to be mutually dissimilar brings
     # the largest cluster to ~497 against the platform's 509, and the cluster
     # count up to ~41 against its ~41, without touching the noise share.
-    "social": {"n_topics": 43, "tail_frac": 0.15, "spread": 2.0,
-               "min_sep": 0.35, "skew": 0.85, "min_samples": None},
+    # Recalibrated for the mpnet teacher. The knobs do not carry over from the
+    # MiniLM run: mpnet's space is more concentrated (mean random-pair cosine
+    # 0.163 against 0.123 on tweets), so slices that were distinct under
+    # MiniLM merge under mpnet, and `min_sep` has to be roughly three times
+    # stricter to keep them apart.
+    "social": {"n_topics": 43, "tail_frac": 0.16, "spread": 1.6,
+               "min_sep": 0.12, "skew": 0.85, "min_samples": None},
     # arXiv carries noticeably more noise than social on the platform (26-29%
     # against 13-22%), and getting that share right is not cosmetic: the best
     # way to label a rejected point flips from reclaiming it to splitting it
     # off somewhere around 24%, so a replica that under-noises titles picks
     # the wrong one. An earlier setting landed at 17-21% and did exactly that.
-    "arxiv": {"n_topics": 52, "tail_frac": 0.28, "spread": 6.5,
-              "min_sep": 0.35, "skew": 0.85, "min_samples": None},
+    # arXiv titles are the hardest shape to hit: nine words each, so the pool
+    # is dense and slices merge readily. This lands the noise share, the median
+    # and the maximum but runs a few clusters short of the platform's ~40.
+    "arxiv": {"n_topics": 80, "tail_frac": 0.18, "spread": 2.0,
+              "min_sep": 0.12, "skew": 0.85, "min_samples": None},
 }
 
 # The envelope the platform's twelve observed subsets span, with a little
@@ -322,17 +330,16 @@ def main() -> None:
 
     args.out.mkdir(parents=True, exist_ok=True)
     pools = {kind: load_pool(names) for kind, names in SOURCES.items()}
-    # Rounds are disjoint on the platform; one `taken` mask per pool spanning
-    # every subset we generate emulates that.
-    taken = {kind: np.zeros(len(texts), bool) for kind, (texts, _) in pools.items()}
-
-    for kind, (texts, _) in pools.items():
-        for path in sorted(args.out.glob("round_*_subset_*.json")):
-            existing = set(json.loads(path.read_text())["texts"])
-            if existing:
-                taken[kind] |= np.isin(texts, list(existing))
 
     for round_index in range(args.start_round, args.start_round + args.rounds):
+        # Disjoint within a round, independent across rounds -- which is both
+        # what the platform does (it samples its corpus fresh each round) and
+        # the only thing the pool can support. Carrying one mask across every
+        # round asked for 135k social texts from a 100k pool, and once it was
+        # exhausted the subsets stopped being samples at all: six of them baked
+        # to 2-8 clusters with 4400 of 5000 points in one.
+        taken = {kind: np.zeros(len(texts), bool)
+                 for kind, (texts, _) in pools.items()}
         for subset in (1, 2, 3, "arxiv"):
             name = f"round_{round_index:04d}_subset_{subset}"
             path = args.out / f"{name}.json"
