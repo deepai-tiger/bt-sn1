@@ -37,6 +37,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import lzma
 import sys
 from pathlib import Path
@@ -48,7 +49,7 @@ from sklearn.cluster import MiniBatchKMeans
 from sklearn.feature_extraction.text import HashingVectorizer
 from sklearn.preprocessing import normalize
 
-DISTILL_DIR = Path("/tmp/sn1_distill")
+DISTILL_DIR = Path(os.environ.get("SN1_TEACHER_DIR", "/tmp/sn1_distill"))
 SUBMISSION = Path(__file__).parent.parent / "champion-code" / "code_submission_v1.py"
 
 # 15 bits per codepoint. Base64 would give 6, and the submission limit counts
@@ -419,9 +420,9 @@ def main() -> None:
 
         print("projecting target to PCA basis (no whitening preserves inner products)")
         centred = Y - Y.mean(0, keepdims=True)
-        # Eigendecomposition of the 384x384 covariance beats an SVD of the
-        # 260k x 384 matrix and gives components already ordered by variance,
-        # so a smaller `dims` is just a prefix of the same basis.
+        # Eigendecomposition of the (d x d) covariance beats an SVD of the
+        # (n x d) matrix and gives components already ordered by variance, so a
+        # smaller `dims` is just a prefix of the same basis.
         cov = (centred.T @ centred) / max(len(centred) - 1, 1)
         eigvals, eigvecs = np.linalg.eigh(cov.astype(np.float64))
         order = np.argsort(-eigvals)[:MAX_DIMS]

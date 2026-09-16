@@ -3,8 +3,17 @@
 Step 1 of building the submission's distilled embedding. The submission cannot
 download a model, so the only way to get sentence-transformer knowledge into
 the sandbox is to bake a linear approximation of it into the source file. This
-script produces the regression target: MiniLM embeddings for a large sample of
-in-domain text.
+script produces the regression target: teacher embeddings for a large sample
+of in-domain text.
+
+The teacher is `all-mpnet-base-v2`, and that is not a guess. The validator
+source names it twice -- "text_clustering bake mode (mpnet + UMAP + HDBSCAN
+peaks ~12GB)" in `common/models/api/job.py` -- and the 12GB figure fits a
+768-dimension base model rather than MiniLM's 384. Everything here was built
+against MiniLM first, which was wrong twice over: the blob approximated the
+wrong teacher, and `make_rounds.py` baked its ground truth from the wrong
+embeddings, so the replica was scoring against a pipeline the platform does
+not run.
 
 Runs in the ground-truth venv (needs torch). Feature hashing and the fit itself
 happen in `distill_fit.py` under the *submission* venv, so the hashing is
@@ -24,7 +33,7 @@ import numpy as np
 
 CORPUS_DIR = Path("/tmp/sn1_corpus")
 OUT = Path("/tmp/sn1_distill")
-EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+EMBED_MODEL = "sentence-transformers/all-mpnet-base-v2"
 
 
 def evaluation_texts(dirs: list[Path]) -> set[str]:
@@ -60,11 +69,17 @@ def sample(path: Path, count: int, seed: int, exclude: set[str]) -> list[str]:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--reddit", type=int, default=90000)
-    parser.add_argument("--tweets", type=int, default=110000)
+    # mpnet costs far more than MiniLM did: ~16 texts/s on 4 CPU cores against
+    # MiniLM's ~500, so the sample sizes are set by wall time rather than by
+    # what helps. Fidelity was already collision-bound rather than data-bound
+    # (the hash has 8192 buckets for millions of n-grams), so a smaller sample
+    # is the cheap side of this trade.
+    parser.add_argument("--reddit", type=int, default=40000)
+    parser.add_argument("--tweets", type=int, default=60000)
     parser.add_argument("--arxiv", type=int, default=60000)
-    parser.add_argument("--batch", type=int, default=256)
+    parser.add_argument("--batch", type=int, default=64)
     parser.add_argument("--seed", type=int, default=11)
+    parser.add_argument("--model", type=str, default=EMBED_MODEL)
     parser.add_argument("--out", type=Path, default=OUT)
     parser.add_argument("--rounds-dir", action="append", type=Path,
                         default=None, help="round directories to hold out")
@@ -73,7 +88,8 @@ def main() -> None:
     from sentence_transformers import SentenceTransformer
 
     args.out.mkdir(parents=True, exist_ok=True)
-    model = SentenceTransformer(EMBED_MODEL)
+    print(f"teacher: {args.model}", flush=True)
+    model = SentenceTransformer(args.model)
 
     rounds = args.rounds_dir or [Path("/tmp/sn1_rounds"), Path("/tmp/sn1_holdout")]
     exclude = evaluation_texts([d for d in rounds if d.exists()])

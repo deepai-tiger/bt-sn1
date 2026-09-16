@@ -42,12 +42,16 @@ from __future__ import annotations
 import argparse
 import itertools
 import json
+import os
 import random
 from pathlib import Path
 
 import numpy as np
 
-DISTILL_DIR = Path("/tmp/sn1_distill")
+# Teacher embeddings the ground truth is baked from. Overridable because the
+# teacher changed: mpnet lives in a separate directory from the MiniLM run
+# it replaced, so the two replicas can be compared rather than conflated.
+DISTILL_DIR = Path(os.environ.get("SN1_TEACHER_DIR", "/tmp/sn1_distill"))
 ROUNDS_DIR = Path("/tmp/sn1_rounds")
 
 SAMPLE_SIZE = 5000
