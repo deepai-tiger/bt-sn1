@@ -1,0 +1,20 @@
+Fetching submission 180373...
+Fetching 3c06dd2a-c78d-4ff9-bb3e-e75a9ed405b6.log...
+╭────────────────────────────────────────────────────────────────────────────────── 3c06dd2a-c78d-4ff9-bb3e-e75a9ed405b6.log ───────────────────────────────────────────────────────────────────────────────────╮
+│ Waiting for files...                                                                                                                                                                                          │
+│ sandbox_ready                                                                                                                                                                                                 │
+│ Text Clustering Miner Start                                                                                                                                                                                   │
+│ INFO:     Started server process [16]                                                                                                                                                                         │
+│ INFO:     Waiting for application startup.                                                                                                                                                                    │
+│ INFO:     Application startup complete.                                                                                                                                                                       │
+│ INFO:     Uvicorn running on http://0.0.0.0:8001 (Press CTRL+C to quit)                                                                                                                                       │
+│ INFO:     10.244.9.199:49538 - "GET /health HTTP/1.1" 200 OK                                                                                                                                                  │
+│ /usr/local/lib/python3.12/site-packages/sklearn/feature_extraction/text.py:1368: UserWarning: Upper case characters found in vocabulary while 'lowercase' is True. These entries will not be matched with any │
+│ documents                                                                                                                                                                                                     │
+│   warnings.warn(                                                                                                                                                                                              │
+│ INFO:     10.244.9.199:49554 - "POST /cluster HTTP/1.1" 200 OK                                                                                                                                                │
+│ INFO:     10.244.9.199:36214 - "POST /cluster HTTP/1.1" 200 OK                                                                                                                                                │
+│ INFO:     10.244.9.199:33670 - "POST /cluster HTTP/1.1" 200 OK                                                                                                                                                │
+│ INFO:     10.244.9.199:51730 - "POST /cluster HTTP/1.1" 200 OK                                                                                                                                                │
+│                                                                                                                                                                                                               │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
