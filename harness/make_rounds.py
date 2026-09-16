@@ -68,7 +68,12 @@ TARGET = {
 SHAPE = {
     "social": {"n_topics": 42, "tail_frac": 0.16, "spread": 2.0,
                "min_samples": None},
-    "arxiv": {"n_topics": 48, "tail_frac": 0.18, "spread": 4.0,
+    # arXiv carries noticeably more noise than social on the platform (26-29%
+    # against 13-22%), and getting that share right is not cosmetic: the best
+    # way to label a rejected point flips from reclaiming it to splitting it
+    # off somewhere around 24%, so a replica that under-noises titles picks
+    # the wrong one. An earlier setting landed at 17-21% and did exactly that.
+    "arxiv": {"n_topics": 48, "tail_frac": 0.24, "spread": 5.0,
               "min_samples": None},
 }
 

@@ -74,31 +74,36 @@ minutes for 300k titles on 4 CPU cores); the fit caches its normal equations,
 so tuning `--dims`, `--alpha`, `--subspaces` and `--prune` afterwards costs
 ~25s a go.
 
-It is trained on arXiv titles **only**, because the submission only ever
-applies it to titles. `--reddit 0 --tweets 0` is the whole point, not an
-abbreviation: the mixed-domain fit it replaced spent most of its capacity on
-social text the blob is never used on, and specializing was worth +0.024 on
-held-out arXiv.
+One map, trained on all three sources, serving both paths. It was briefly
+specialized to arXiv titles, which was correct only while the social path had
+the blob switched off; once reclaiming rejects made the blob useful on social
+too, a shared map won (held out 0.4485 against 0.4309).
 
 ```bash
-/tmp/gtvenv/bin/python harness/distill_encode.py \
-    --reddit 0 --tweets 0 --arxiv 300000                    # MiniLM targets
+/tmp/gtvenv/bin/python harness/distill_encode.py            # MiniLM targets
 /tmp/venv/bin/python harness/distill_fit.py --dims 32 --subspaces 8 \
     --prune 0.5 --alpha 0.1 --word 6144 --char 2048 \
-    --reddit 0 --tweets 0 --arxiv 300000                    # fit and pack
-/tmp/venv/bin/python harness/grid.py --spec harness/specs/title_distilled_w.json \
-    --subset arxiv --blob /tmp/sn1_distill/blob.txt         # A/B before baking
+    --reddit 90000 --tweets 110000 --arxiv 300000           # fit and pack
+/tmp/venv/bin/python harness/grid.py --spec harness/specs/blob_choice.json \
+    --blob /tmp/sn1_distill/blob.txt                        # A/B before baking
 /tmp/venv/bin/python harness/embed_blob.py /tmp/sn1_distill/blob.txt
 /tmp/venv/bin/python harness/test_blob.py                   # format round trip
 /tmp/venv/bin/python harness/minify.py                      # check the limit
 ```
 
-`distill_encode.py` drops any text that appears in a round under
+`distill_fit.py` drops any text that appears in a round under
 `/tmp/sn1_rounds` or `/tmp/sn1_holdout`. Without that the overlap is total --
-corpus and rounds come from the same dump, so all 5000 titles of every round
-were also training rows. It turns out not to matter much (the honest fit
-scores 0.3236 against the leaky one's 0.3241, i.e. 8192x32 parameters cannot
-memorize 300k titles), but the measurement is only trustworthy with it.
+corpus and rounds are drawn from the same pools, so all 5000 texts of every
+round are also training rows. It turns out not to matter much (an honest fit
+scored 0.3236 against a leaky one's 0.3241: 8192x32 parameters cannot
+memorize 300k texts), but the measurement is only trustworthy with it. The
+filter lives at fit time rather than encode time so that re-cutting the rounds
+does not cost another 12-minute encode.
+
+Generating more rounds therefore shrinks the training pool, since rounds and
+corpus compete for the same texts. At 36 subsets it costs 0.036 of fidelity
+and nothing measurable in score (0.4349 against 0.4360), so prefer more
+rounds.
 
 Two knobs interact and should be moved together:
 
@@ -115,6 +120,74 @@ More `--dims` is nearly free at fixed `--subspaces` and still does not help:
 the subvectors get wider, and quantization gives back more than the extra
 dimensions earn (dims 64 at 8 subspaces reconstructs to 0.41, dims 32 to
 0.50).
+
+## Calibrating the replica, and why it matters more than anything else here
+
+Running the platform's pipeline is not the same as reproducing its rounds, and
+the difference is not academic: it cost a submission. The replica used to
+assemble subsets from broad topical slices, which baked to
+
+|  | clusters | noise |
+|---|---|---|
+| replica social | 41-54 | 26-39% |
+| platform social | 34-49 | 13-22% |
+| replica arXiv | 21-29 | 40-42% |
+| platform arXiv | 39-41 | 26-29% |
+
+A subreddit is not a topic, it is dozens of them, and a random sample over 154
+arXiv categories is diffuse enough that HDBSCAN discards two fifths of it. So
+the replica was scoring submissions against rounds a third of whose points
+carried one shared noise label. Tuning on that rewarded lumping aggressively
+and cutting coarsely, and the submission that won locally by 0.10 lost on the
+platform by 0.10 -- an inverted harness, which is worse than no harness.
+
+Slices are now the nearest neighbours of a seed post in embedding space, which
+is what crawling a topic returns, with `spread` controlling how much of the
+topic's fringe comes along. `--calibrate` sweeps the shape knobs and scores
+them against the platform's reported statistics:
+
+```bash
+/tmp/gtvenv/bin/python harness/make_rounds.py --calibrate
+```
+
+Calibrated, the replica reproduces the platform's ordering for the first time:
+the champion reconstruction scores 0.4010 against our then-0.3879.
+
+Two cautions learned the hard way:
+
+* **Calibrate against both statistics, not the mean of one.** The noise share
+  drives structural decisions directly, and `metadata*.json` is the only
+  window onto it. arXiv sitting 10 points higher in noise than social is not a
+  detail; it changes which noise mode is optimal.
+* **Do not chase the argmax cell.** A single seed draw swings the baked shape
+  a long way -- n_topics 35 against 40 at the same tail and spread gave 22
+  clusters at 2% noise against 41 at 15%. Pick central knobs and let
+  individual subsets scatter, as the platform's own do.
+
+## The noise share decides the output shape
+
+`noise_sensitivity.py` scores all three noise modes on every subset and groups
+by how much noise the ground truth actually holds. Over 36 subsets:
+
+| ground-truth noise | n | reclaim | bucket | singleton |
+|---|---|---|---|---|
+| under 18% | 16 | **0.4990** | 0.4087 | 0.4773 |
+| 18-24% | 8 | **0.4341** | 0.3718 | 0.4271 |
+| over 24% | 12 | 0.3793 | 0.3612 | **0.3865** |
+
+This is the single highest-leverage setting in the submission -- the spread
+between best and worst mode is 0.09, several times any feature change -- and
+it is entirely determined by a property of the data, not of the algorithm. It
+is also why the miscalibrated replica was so damaging: at 30-42% noise the
+table says bucket, and bucket is what the submission shipped.
+
+Reclaiming wins below the crossover because a rejected point is usually a real
+cluster member the clusterer was unsure of rather than something genuinely
+unclusterable, and at 17% true noise the odds favour guessing a home for it.
+
+The platform's social subsets sit at 13-22% and its arXiv at 26-29%, which
+straddles the crossover, so the arXiv path is deliberately set to the
+non-argmax choice: see the comment on `title_noise_mode`.
 
 ## Before submitting, run this
 
@@ -136,8 +209,9 @@ started, `/health` answered `healthy`, the reported evaluation error was
 container does, waits for `/health`, POSTs each round to `/cluster`, scores
 the replies, and tracks peak RSS against the 1536 MiB cap. It is the only
 check here that covers request parsing, response validation, JSON
-serialization and memory. Currently: 0.3892 tuning, 0.3801 held out, 592 MiB
-peak, matching the in-process numbers exactly.
+serialization and memory. Currently: 0.4349 tuning, 0.4452 held out (24
+subsets), 614 MiB peak, matching the in-process numbers exactly. The champion
+reconstruction scores 0.4010 and 0.4000 on the same rounds.
 
 Two lessons worth keeping in mind, since both bugs came from the same place:
 
@@ -153,7 +227,9 @@ Two lessons worth keeping in mind, since both bugs came from the same place:
 | file | role |
 |---|---|
 | `collect_data.py` | pulls Reddit / X / arXiv parquet shards, keeps a coarse topic label per row |
-| `make_rounds.py` | assembles topically structured subsets and bakes ground truth with the real pipeline |
+| `make_rounds.py` | assembles focused subsets and bakes ground truth with the real pipeline; `--calibrate` fits its shape to the platform's |
+| `calibrate_gt.py` | sweeps the baking side (HDBSCAN params) against the platform's reported stats |
+| `noise_sensitivity.py` | scores every noise mode against each subset's true noise share |
 | `score.py` | the competition metric: `(max(0, ARI) + NMI) / 2` |
 | `evaluate.py` | imports a submission's `cluster_texts` and scores it across all rounds |
 | `serve_eval.py` | serves a build as a subprocess and scores it over HTTP, as the platform does |
@@ -180,6 +256,9 @@ do with these features if it were handed the true cluster locations for free:
 |---|---|---|---|---|
 | social subset | **0.418** | 0.417 | 0.376 | 0.392 |
 | arXiv subset | **0.333** | 0.286 | 0.260 | 0.259 |
+
+(Measured on the pre-calibration rounds; the conclusion held up, but the
+absolute numbers are not comparable to anything else in this file.)
 
 The pipeline already matches the oracle on social text and beats it on titles.
 It can do that because the metric rewards output *shape* -- the noise bucket,
