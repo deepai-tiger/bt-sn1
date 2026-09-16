@@ -1,0 +1,14 @@
+{
+  "bucket(G=1)":   {"noise_mode": "bucket", "title_noise_mode": "bucket"},
+  "sub_G2":   {"noise_groups": 2,   "title_noise_groups": 2},
+  "sub_G4":   {"noise_groups": 4,   "title_noise_groups": 4},
+  "sub_G8":   {"noise_groups": 8,   "title_noise_groups": 8},
+  "sub_G16":  {"noise_groups": 16,  "title_noise_groups": 16},
+  "sub_G24":  {"noise_groups": 24,  "title_noise_groups": 24},
+  "sub_G40":  {"noise_groups": 40,  "title_noise_groups": 40},
+  "sub_G64":  {"noise_groups": 64,  "title_noise_groups": 64},
+  "sub_G120": {"noise_groups": 120, "title_noise_groups": 120},
+  "sub_G250": {"noise_groups": 250, "title_noise_groups": 250},
+  "sub_G600": {"noise_groups": 600, "title_noise_groups": 600},
+  "singleton": {"noise_mode": "singleton", "title_noise_mode": "singleton"}
+}

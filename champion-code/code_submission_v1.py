@@ -102,13 +102,26 @@ CONFIG: dict[str, object] = {
     "reduce_dim": 80,
     "spectral_knn": 25,
 
-    # How unclustered points are labelled. Ground truth puts every noise point
-    # under one shared label, so a single bucket earns pair credit for the
-    # 13-29% of the batch that HDBSCAN rejects. Measured +0.045 combined over
-    # the singleton flood the previous submission used.
+    # How unclustered points are labelled. The two metrics disagree sharply
+    # here, and the disagreement decides the shape of the output:
+    #
+    #   * ARI counts pairs. Ground truth puts every noise point under one
+    #     shared label, so a single bucket collects pair credit for all of it.
+    #   * NMI is not adjusted for chance. Splitting the rejects drives the
+    #     mutual information up faster than it drives the prediction's entropy
+    #     up, so a singleton per reject scores *better* on NMI -- which is why
+    #     the previous submission flooded singletons.
+    #
+    # Measured over both paths, the trade-off is U-shaped and the extremes win:
+    # grouping the rejects into 4-600 coherent groups is worse than either
+    # bucketing or splitting them (social 0.345-0.375 against 0.413 bucketed;
+    # arXiv 0.193-0.209 against 0.241 split). Which extreme wins follows from
+    # how good the clustering already is. On social text there is real pair
+    # credit to collect, so the bucket wins by 0.069; on titles the clusters
+    # are weak enough that NMI dominates and splitting wins by 0.018.
+    #
     # "bucket"    - one shared id, mirroring ground truth's single -1 group
-    # "singleton" - a unique id per point: contributes no pairs, so it trades
-    #               NMI for ARI (an abstention)
+    # "singleton" - a unique id per point: contributes no pairs at all
     # "none"      - push rejects back into their nearest cluster
     "noise_mode": "bucket",
     # Extra points promoted to noise beyond the clusterer's own rejects, as a
@@ -199,43 +212,56 @@ NOISE_LABEL = -1
 _RNG_SEED = 0
 
 # --------------------------------------------------------------------------
-# Distilled embedding slot
+# Distilled embedding
 #
-# The strongest single feature available to an offline submission is a linear
-# map from hashed n-grams into a sentence-embedding space, distilled from the
-# target model and baked into this file. The 50,000-character limit counts
-# *characters*, so weights are packed 15 bits per CJK codepoint rather than 6
-# bits as base64 would give.
+# Every other feature block in this file can only see the 5000 texts in the
+# request. That is enough to learn which words co-occur *in this batch*, but
+# not that "leptogenesis" and "neutrino" belong together, which is exactly the
+# knowledge the ground truth's sentence transformer contributes. With no
+# internet and a 50,000-character source limit, the most model that fits is a
+# single linear map from hashed n-grams into a sentence-embedding space,
+# fitted offline against the target model (see harness/distill_fit.py).
 #
-# No blob is shipped here: the previous submission's two blobs were lost in the
-# Apex CLI export and retraining one needs a GPU and a corpus. Every consumer
-# treats its absence as "feature unavailable", so the pipeline runs without it.
-# Drop a blob in and it is picked up automatically.
+# The blob is stored 15 bits per codepoint. The limit counts *characters*, so
+# this carries 2.5x what base64 would for the same budget.
+#
+# Rows are product-quantized: each hash bucket's row is a direction in
+# embedding space, split into a few blocks that are each snapped to one of 256
+# learned prototypes, plus an 8-bit log-magnitude. Quantizing whole directions
+# beats quantizing each weight independently because a document embedding is a
+# weighted sum over hundreds of buckets, so residual direction errors average
+# down instead of adding up. Splitting into blocks is what makes it affordable:
+# the codebooks cost `256 * dims` bytes regardless of how many blocks there
+# are, while the representable directions number 256**blocks.
+#
+# If the blob is missing or corrupt, every consumer treats the feature as
+# unavailable and the pipeline still runs -- just measurably worse on titles.
 # --------------------------------------------------------------------------
 
 DISTILLED_BLOB = ""
-DISTILLED_WORD_BUCKETS = 8192
-DISTILLED_CHAR_BUCKETS = 4096
-DISTILLED_DIMS = 48
-_DISTILLED_CACHE: np.ndarray | None = None
-_CJK_BASE = 19968
+_DISTILLED_CACHE: tuple[np.ndarray, int, int] | None = None
+_BLOB_BASE = 19968
+_BLOB_BITS = 15
 
 
 def _unpack_blob(text: str) -> bytes:
-    """Decode 15-bits-per-codepoint packing."""
     acc = bits = 0
     out = bytearray()
     for ch in text:
-        acc = acc << 15 | (ord(ch) - _CJK_BASE)
-        bits += 15
+        acc = acc << _BLOB_BITS | (ord(ch) - _BLOB_BASE)
+        bits += _BLOB_BITS
         while bits >= 8:
             bits -= 8
             out.append(acc >> bits & 0xFF)
     return bytes(out)
 
 
-def load_distilled() -> np.ndarray | None:
-    """Decode the 2-bit-quantized projection matrix, or None if not shipped."""
+def load_distilled() -> tuple[np.ndarray, int, int] | None:
+    """Decode the projection matrix, or None if no usable blob is shipped.
+
+    Returns the matrix plus the word/char bucket counts it was fitted for: the
+    blob is self-describing so the two sides cannot drift apart.
+    """
     global _DISTILLED_CACHE
     if _DISTILLED_CACHE is not None:
         return _DISTILLED_CACHE
@@ -245,43 +271,53 @@ def load_distilled() -> np.ndarray | None:
         import lzma
 
         raw = lzma.decompress(_unpack_blob(DISTILLED_BLOB))
-        rows = DISTILLED_WORD_BUCKETS + DISTILLED_CHAR_BUCKETS
-        n_codes = rows * DISTILLED_DIMS
-        n_bytes = (n_codes + 3) // 4
-        packed = np.frombuffer(raw[:n_bytes], np.uint8)
-        codes = np.zeros(packed.size * 4, np.uint8)
-        for shift in range(4):
-            codes[shift::4] = packed >> (2 * shift) & 3
-        codes = codes[:n_codes].reshape(rows, DISTILLED_DIMS)
-        books = np.frombuffer(raw[n_bytes:n_bytes + DISTILLED_DIMS * 16],
-                              np.float32).reshape(DISTILLED_DIMS, 4)
-        matrix = np.empty(codes.shape, np.float32)
-        for dim in range(DISTILLED_DIMS):
-            matrix[:, dim] = books[dim][codes[:, dim]]
-        _DISTILLED_CACHE = matrix
-        return matrix
+        blocks, protos, dims, word_buckets, char_buckets = (
+            int(v) for v in np.frombuffer(raw[:20], np.uint32))
+        rows = word_buckets + char_buckets
+        width = dims // blocks
+        at = 20
+
+        book_size = blocks * protos * width
+        books = np.frombuffer(raw[at:at + book_size], np.int8) \
+            .reshape(blocks, protos, width).astype(np.float32) / 127.0
+        at += book_size
+        levels = np.frombuffer(raw[at:at + 1024], np.float32)
+        at += 1024
+        codes = np.frombuffer(raw[at:at + rows * blocks], np.uint8) \
+            .reshape(rows, blocks)
+        at += rows * blocks
+        mag = np.frombuffer(raw[at:at + rows], np.uint8)
+
+        matrix = np.concatenate(
+            [books[b][codes[:, b]] for b in range(blocks)], axis=1)
+        matrix = (matrix * levels[mag][:, None]).astype(np.float32)
+        _DISTILLED_CACHE = (matrix, word_buckets, char_buckets)
+        return _DISTILLED_CACHE
     except Exception:  # noqa: BLE001 - a corrupt blob must not take the server down
         return None
 
 
 def distilled_features(docs: list[str]) -> np.ndarray | None:
-    matrix = load_distilled()
-    if matrix is None:
+    loaded = load_distilled()
+    if loaded is None:
         return None
+    matrix, word_buckets, char_buckets = loaded
     try:
         from sklearn.feature_extraction.text import HashingVectorizer
 
-        word = HashingVectorizer(n_features=DISTILLED_WORD_BUCKETS, ngram_range=(1, 2),
-                                 analyzer="word", alternate_sign=False, norm=None,
-                                 dtype=np.float32)
-        char = HashingVectorizer(n_features=DISTILLED_CHAR_BUCKETS, ngram_range=(3, 5),
-                                 analyzer="char_wb", alternate_sign=False, norm=None,
-                                 dtype=np.float32)
+        vectorizers = [HashingVectorizer(
+            n_features=word_buckets, ngram_range=(1, 2), analyzer="word",
+            alternate_sign=False, norm=None, dtype=np.float32)]
+        if char_buckets:
+            vectorizers.append(HashingVectorizer(
+                n_features=char_buckets, ngram_range=(3, 5), analyzer="char_wb",
+                alternate_sign=False, norm=None, dtype=np.float32))
+
         out = np.empty((len(docs), matrix.shape[1]), np.float32)
         for start in range(0, len(docs), 4000):
             chunk = docs[start:start + 4000]
-            block = sparse_hstack([word.transform(chunk),
-                                   char.transform(chunk)]).tocsr()
+            parts = [v.transform(chunk) for v in vectorizers]
+            block = sparse_hstack(parts).tocsr() if len(parts) > 1 else parts[0]
             block.data = np.log1p(block.data).astype(np.float32)
             out[start:start + 4000] = np.asarray(normalize(block) @ matrix,
                                                  dtype=np.float32)
@@ -1031,13 +1067,12 @@ def assign_noise(labels: np.ndarray, Z: np.ndarray, sids: np.ndarray,
                 return compact(out)
 
     out = compact(out)
+    base = int(out.max()) + 1 if (out != NOISE_LABEL).any() else 0
     if mode == "singleton":
-        base = int(out.max()) + 1 if (out != NOISE_LABEL).any() else 0
         out[rejected] = np.arange(base, base + int(rejected.sum()))
         return out
     # "bucket": one shared id. Emit a real id rather than -1 so the label is
     # unambiguous to the scorer.
-    base = int(out.max()) + 1 if (out != NOISE_LABEL).any() else 0
     out[rejected] = base
     return out
 
