@@ -45,16 +45,22 @@ def main() -> None:
 
     minified = python_minifier.minify(
         source,
-        # Not `remove_annotations=True`. That also strips *class attribute*
-        # annotations, and it does it by rewriting `texts: list[str]` to
-        # `texts: 0` -- which leaves valid Python that pydantic then rejects at
-        # class-creation time, so the whole submission fails on import. The
-        # options object defaults to keeping class attribute annotations, which
-        # is exactly what the request/response models need.
+        # Annotations are load-bearing here, in two different ways, and
+        # `remove_annotations=True` breaks both.
+        #
+        # Class attribute annotations: it rewrites `texts: list[str]` to
+        # `texts: 0`, which is valid Python that pydantic rejects at
+        # class-creation time, so the submission fails on import.
+        #
+        # Argument annotations: FastAPI reads `request: ClusterRequest` to
+        # decide that the parameter is the request *body*. Strip it and the
+        # parameter becomes a query parameter, so every POST /cluster comes
+        # back 422 and every subset scores zero -- with a process that starts
+        # cleanly and answers /health, which is what makes it so quiet.
         remove_annotations=RemoveAnnotationsOptions(
             remove_variable_annotations=True,
             remove_return_annotations=True,
-            remove_argument_annotations=True,
+            remove_argument_annotations=False,
             remove_class_attribute_annotations=False,
         ),
         remove_pass=True,
@@ -88,12 +94,18 @@ def main() -> None:
 
 
 def smoke_test(path: Path) -> None:
-    """Import the build and exercise both entry points.
+    """Import the build, then serve it and score it over real HTTP.
 
-    Renaming is only *supposed* to be semantics-preserving. It silently was not
-    here, and the failure was at import time in the FastAPI layer -- which no
-    amount of scoring `cluster_texts` would have caught, because scoring never
-    builds the app.
+    Renaming is only *supposed* to be semantics-preserving, and twice now it
+    silently was not, both times in the FastAPI layer rather than in anything
+    the clustering tests touch. Importing the module and calling `make_app()`
+    caught the first one and sailed straight past the second, because a
+    missing argument annotation produces an app that builds perfectly and
+    then 422s every request.
+
+    So the check has to be the platform's own: start the file as a subprocess,
+    wait for /health, POST to /cluster, and look at what comes back. Anything
+    less does not exercise the part that has actually been breaking.
     """
     import importlib.util
 
@@ -102,18 +114,77 @@ def smoke_test(path: Path) -> None:
     sys.modules["submission_smoke_test"] = module
     spec.loader.exec_module(module)
 
-    app = module.make_app()
-    if app is None:
+    if module.make_app() is None:
         raise SystemExit("make_app() returned nothing")
-
     labels = module.cluster_texts([f"a short document about topic {i % 7}"
                                    for i in range(120)])
     if len(labels) != 120:
         raise SystemExit(f"cluster_texts returned {len(labels)} labels for 120 texts")
-
     if module.DISTILLED_BLOB and module.load_distilled() is None:
         raise SystemExit("the baked blob does not decode in the minified build")
-    print("smoke test: imports, builds the app, clusters, decodes the blob")
+
+    served = serve_and_call(path)
+    print(f"smoke test: imports, clusters, decodes the blob, and answers "
+          f"POST /cluster over HTTP ({served} ids)")
+
+
+def serve_and_call(path: Path, texts: int = 400) -> int:
+    """Run the build the way the platform does and POST one batch to it."""
+    import json
+    import socket
+    import subprocess
+    import time
+    import urllib.error
+    import urllib.request
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+
+    server = subprocess.Popen([sys.executable, str(path), "--port", str(port)],
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                              text=True)
+    try:
+        deadline = time.time() + 60
+        while True:
+            if server.poll() is not None:
+                raise SystemExit(f"server exited {server.returncode}:\n"
+                                 f"{server.stdout.read()[-2000:]}")
+            try:
+                with urllib.request.urlopen(
+                        f"http://127.0.0.1:{port}/health", timeout=2) as reply:
+                    if json.loads(reply.read())["status"] == "healthy":
+                        break
+            except (urllib.error.URLError, OSError, KeyError, ValueError):
+                if time.time() > deadline:
+                    raise SystemExit("server never reported healthy")
+                time.sleep(0.3)
+
+        body = json.dumps({"texts": [f"a short document about topic {i % 9}"
+                                     for i in range(texts)]}).encode()
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{port}/cluster", body,
+            {"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(request, timeout=120) as reply:
+                payload = json.loads(reply.read())
+        except urllib.error.HTTPError as exc:
+            raise SystemExit(f"POST /cluster returned {exc.code}: "
+                             f"{exc.read().decode()[:400]}")
+
+        ids = payload.get("cluster_ids")
+        if not isinstance(ids, list) or len(ids) != texts:
+            raise SystemExit(f"POST /cluster returned {len(ids or [])} ids "
+                             f"for {texts} texts")
+        if not all(isinstance(i, int) for i in ids):
+            raise SystemExit("cluster_ids are not all integers")
+        return len(ids)
+    finally:
+        server.terminate()
+        try:
+            server.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            server.kill()
 
 
 if __name__ == "__main__":

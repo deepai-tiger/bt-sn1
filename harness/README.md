@@ -116,6 +116,38 @@ the subvectors get wider, and quantization gives back more than the extra
 dimensions earn (dims 64 at 8 subspaces reconstructs to 0.41, dims 32 to
 0.50).
 
+## Before submitting, run this
+
+```bash
+/tmp/venv/bin/python harness/minify.py                      # build + HTTP smoke test
+/tmp/venv/bin/python harness/serve_eval.py build/submission.min.py
+```
+
+`evaluate.py` imports `cluster_texts` and calls it directly, which is what you
+want while tuning but skips the entire serving layer. That gap cost a whole
+round: a build scoring 0.3801 under `evaluate.py` scored **0.0** on the
+platform, because the minifier had dropped the endpoint's argument annotation
+and FastAPI fell back to reading the request body as a query parameter. Every
+POST /cluster came back 422. Nothing looked wrong from outside -- the process
+started, `/health` answered `healthy`, the reported evaluation error was
+`None`, and the only hint was that scoring took 3.33s instead of ~75s.
+
+`serve_eval.py` is the fix for that class of bug: it runs the file the way the
+container does, waits for `/health`, POSTs each round to `/cluster`, scores
+the replies, and tracks peak RSS against the 1536 MiB cap. It is the only
+check here that covers request parsing, response validation, JSON
+serialization and memory. Currently: 0.3892 tuning, 0.3801 held out, 592 MiB
+peak, matching the in-process numbers exactly.
+
+Two lessons worth keeping in mind, since both bugs came from the same place:
+
+* **The minified build is the artefact, not the source.** Both failures were
+  invisible in `code_submission_v1.py` and appeared only after minification.
+  Never submit a build that has not been scored as a build.
+* **Test the interface, not just the function.** The clustering is exercised
+  constantly; the four lines of FastAPI wiring are where both bugs landed,
+  because nothing was calling them.
+
 ## Files
 
 | file | role |
@@ -124,6 +156,8 @@ dimensions earn (dims 64 at 8 subspaces reconstructs to 0.41, dims 32 to
 | `make_rounds.py` | assembles topically structured subsets and bakes ground truth with the real pipeline |
 | `score.py` | the competition metric: `(max(0, ARI) + NMI) / 2` |
 | `evaluate.py` | imports a submission's `cluster_texts` and scores it across all rounds |
+| `serve_eval.py` | serves a build as a subprocess and scores it over HTTP, as the platform does |
+| `deframe_export.py` | recovers source from the CLI's Rich panel, flagging truncated lines |
 | `sweep.py` | prepared A/B experiments over `CONFIG` |
 | `grid.py` | runs a JSON list of `CONFIG` overrides; can inject a candidate blob with `--blob` |
 | `probe.py` | single-variant run, for quick one-offs |
