@@ -414,11 +414,31 @@ against the platform's reported 0.405 -- the A/B against it is fair, but it is
 not a like-for-like reconstruction of the real submission's score. The current
 submission ships its own blob, retrained from scratch (see `distill_fit.py`).
 
-**The exact embedding model.** The competition says "sentence-transformer"
-without naming one. This assumes `all-MiniLM-L6-v2`, by far the most common
-default. If the platform uses something else, the distilled embedding is
-distilled from the wrong teacher -- though sentence-embedding spaces correlate
-strongly enough that it should still carry most of its value.
+**The exact embedding model -- resolved, and it was wrong.** This used to
+assume `all-MiniLM-L6-v2`, on the grounds that the competition text says
+"sentence-transformer" without naming one and MiniLM is the common default.
+The validator source names the real one twice:
+
+> text_clustering bake mode (mpnet + UMAP + HDBSCAN peaks ~12GB)
+> -- `shared/common/src/common/models/api/job.py`
+
+The teacher is `all-mpnet-base-v2`: 768 dimensions, which is also what makes a
+12GB bake plausible where MiniLM's 384 would not. The caveat above hoped that
+"sentence-embedding spaces correlate strongly enough that it should still
+carry most of its value", and that hope is the part that did not survive. Two
+separate things were built on the wrong teacher:
+
+* the blob, which approximated MiniLM rather than mpnet, and
+* `make_rounds.py`, which *baked its ground truth* from MiniLM embeddings --
+  so the replica was not an imperfect model of the platform's pipeline, it was
+  a faithful model of a different one.
+
+The second is the serious one, because every decision calibrated on the
+replica inherits it. Note the shape of this mistake, since it is the third of
+its kind here: the assumption was written down honestly, labelled as an
+assumption, and then never tested, while a growing pile of conclusions was
+stacked on top of it. The public competition text cannot settle it; only the
+validator source can.
 
 **Sandbox speed.** This VM runs the same pipeline in roughly half the wall time
 the platform recorded (10.7s here vs 21.8s there). Treat local timings as
