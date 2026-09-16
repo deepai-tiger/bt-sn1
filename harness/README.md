@@ -69,20 +69,52 @@ uv pip install --python /tmp/gtvenv/bin/python \
 
 ### Rebuilding the distilled embedding
 
-The one baked artefact in the submission. Encoding is the slow part (~25
-minutes on 4 CPU cores); the fit caches its normal equations, so tuning
-`--dims`, `--alpha`, `--subspaces` and `--prune` afterwards costs ~25s a go.
+The one baked artefact in the submission. Encoding is the slow part (~12
+minutes for 300k titles on 4 CPU cores); the fit caches its normal equations,
+so tuning `--dims`, `--alpha`, `--subspaces` and `--prune` afterwards costs
+~25s a go.
+
+It is trained on arXiv titles **only**, because the submission only ever
+applies it to titles. `--reddit 0 --tweets 0` is the whole point, not an
+abbreviation: the mixed-domain fit it replaced spent most of its capacity on
+social text the blob is never used on, and specializing was worth +0.024 on
+held-out arXiv.
 
 ```bash
-/tmp/gtvenv/bin/python harness/distill_encode.py            # MiniLM targets
+/tmp/gtvenv/bin/python harness/distill_encode.py \
+    --reddit 0 --tweets 0 --arxiv 300000                    # MiniLM targets
 /tmp/venv/bin/python harness/distill_fit.py --dims 32 --subspaces 8 \
-    --prune 0.5 --alpha 0.2 --word 6144 --char 2048         # fit and pack
-/tmp/venv/bin/python harness/grid.py --spec harness/specs/distilled_w.json \
+    --prune 0.5 --alpha 0.1 --word 6144 --char 2048 \
+    --reddit 0 --tweets 0 --arxiv 300000                    # fit and pack
+/tmp/venv/bin/python harness/grid.py --spec harness/specs/title_distilled_w.json \
     --subset arxiv --blob /tmp/sn1_distill/blob.txt         # A/B before baking
 /tmp/venv/bin/python harness/embed_blob.py /tmp/sn1_distill/blob.txt
 /tmp/venv/bin/python harness/test_blob.py                   # format round trip
 /tmp/venv/bin/python harness/minify.py                      # check the limit
 ```
+
+`distill_encode.py` drops any text that appears in a round under
+`/tmp/sn1_rounds` or `/tmp/sn1_holdout`. Without that the overlap is total --
+corpus and rounds come from the same dump, so all 5000 titles of every round
+were also training rows. It turns out not to matter much (the honest fit
+scores 0.3236 against the leaky one's 0.3241, i.e. 8192x32 parameters cannot
+memorize 300k titles), but the measurement is only trustworthy with it.
+
+Two knobs interact and should be moved together:
+
+* **`--alpha` and `--prune`.** Pruning removes rows the fit is relying on, so
+  the weaker the ridge the more pruning costs: at 50% pruning, `alpha=0.1`
+  scores 0.627 and `alpha=0.01` only 0.542, even though `alpha=0.01` is the
+  better *unpruned* fit. Mild pruning at `alpha=0.1` actually beats no
+  pruning at all, acting as extra regularization.
+* **`--prune-by`.** `norm` and `energy` are equivalent at the 50% we ship, but
+  `energy` (row norm times the gram diagonal, so the bucket's real mass over
+  the corpus) is far better when pruning hard: 0.53 versus 0.40 at 80%.
+
+More `--dims` is nearly free at fixed `--subspaces` and still does not help:
+the subvectors get wider, and quantization gives back more than the extra
+dimensions earn (dims 64 at 8 subspaces reconstructs to 0.41, dims 32 to
+0.50).
 
 ## Files
 
@@ -113,7 +145,7 @@ do with these features if it were handed the true cluster locations for free:
 | | pipeline | oracle | kmeans(true k) | ward(true k) |
 |---|---|---|---|---|
 | social subset | **0.418** | 0.417 | 0.376 | 0.392 |
-| arXiv subset | **0.288** | 0.260 | 0.248 | 0.243 |
+| arXiv subset | **0.333** | 0.286 | 0.260 | 0.259 |
 
 The pipeline already matches the oracle on social text and beats it on titles.
 It can do that because the metric rewards output *shape* -- the noise bucket,
@@ -126,7 +158,45 @@ searches, where all 13 social variants land within +/-0.005 of the default.
 Cluster ensembles, better cut selection and alternative linkages all have a
 ceiling of roughly where the submission already sits. The only lever with room
 left is representation quality, which means a higher-fidelity distilled
-embedding (currently reproducing 53% of MiniLM's pairwise geometry).
+embedding (now reproducing 61% of MiniLM's pairwise geometry on titles, up
+from 53%).
+
+Even that lever is close to spent, and the reason is hash collisions. 300k
+titles produce millions of distinct word n-grams competing for 6144 buckets,
+so every bucket mixes hundreds of unrelated n-grams and the map can only ever
+learn a coarse sketch. Widening the hash is the fix, and the character limit
+forbids it: the bucket count sets the row count, which sets the size. Adding
+training data no longer moves fidelity, which is what being collision-bound
+rather than data-bound looks like.
+
+## What the v2 champion export was worth
+
+The v2 export (0.4117 on the platform, against v1's 0.4052) is framed by the
+CLI the same way v1 was, so `deframe_export.py` recovers the logic but both of
+its blobs are cut to ~100 characters -- Rich pads to a *display* width and CJK
+codepoints are double-width, so the cut lands at ~100 characters rather than
+the 200 that plain ASCII lines get. The weights stay unrecoverable.
+
+The logic was still worth reading. v2 keeps **two** blobs, one per domain, and
+routes titles through an otherwise separate pipeline. Testing each idea it
+contains against this harness:
+
+| v2 idea | result |
+|---|---|
+| separate per-domain blobs | **adopted**, as a titles-only fit: arXiv 0.2999 -> 0.3236 held out |
+| a social blob at any weight | rejected: -0.002 held out, even trained on data overlapping the rounds |
+| 80-way average-linkage cut on titles, 40% singletons | rejected: 0.266 against 0.320 |
+| its smoothing (k=20, alpha=0.6, 4 iters) and char weight 0.35 | rejected: within noise on tuning, worse held out |
+| whole-post co-occurrence instead of a 10-token window | rejected: 0.4127 against 0.4132 |
+| merging clusters that share a non-Latin script | untestable: 5-40% script share to fire, these rounds run under 0.7% |
+| sparse blob rows (delta-coded indices, 4-bit codes) | not needed: the budget is not the binding constraint |
+
+The pattern in the rejections is that v2's shape choices are calibrated to a
+blob far better than ours. Cutting to 80 clusters and discarding 40% of the
+points as singletons pays off when the features can support that many
+distinct, trustworthy groups; on ours it just fragments. The transferable part
+was never a hyperparameter, it was the decision to specialize the map per
+domain.
 
 ## What the harness cannot reproduce
 
