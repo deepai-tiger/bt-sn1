@@ -1,2 +1,23 @@
-Fetching submission 180310...
-No hotkey file path found. Please run `apex link` to link your wallet and hotkey.
+Fetching submission 180342...
+Fetching 245d0c9f-f908-4c54-9d06-86204527f2e5.log...
+╭────────────────────────────────────────────────────────────────────────────────── 245d0c9f-f908-4c54-9d06-86204527f2e5.log ───────────────────────────────────────────────────────────────────────────────────╮
+│ Waiting for files...                                                                                                                                                                                          │
+│ sandbox_ready                                                                                                                                                                                                 │
+│ Text Clustering Miner Start                                                                                                                                                                                   │
+│ INFO:     Started server process [16]                                                                                                                                                                         │
+│ INFO:     Waiting for application startup.                                                                                                                                                                    │
+│ INFO:     Application startup complete.                                                                                                                                                                       │
+│ INFO:     Uvicorn running on http://0.0.0.0:8001 (Press CTRL+C to quit)                                                                                                                                       │
+│ INFO:     10.244.9.196:45488 - "GET /health HTTP/1.1" 200 OK                                                                                                                                                  │
+│ INFO:     10.244.9.196:45492 - "POST /cluster HTTP/1.1" 200 OK                                                                                                                                                │
+│ /usr/local/lib/python3.12/site-packages/sklearn/feature_extraction/text.py:1368: UserWarning: Upper case characters found in vocabulary while 'lowercase' is True. These entries will not be matched with any │
+│ documents                                                                                                                                                                                                     │
+│   warnings.warn(                                                                                                                                                                                              │
+│ INFO:     10.244.9.196:52898 - "POST /cluster HTTP/1.1" 200 OK                                                                                                                                                │
+│ /usr/local/lib/python3.12/site-packages/sklearn/feature_extraction/text.py:1368: UserWarning: Upper case characters found in vocabulary while 'lowercase' is True. These entries will not be matched with any │
+│ documents                                                                                                                                                                                                     │
+│   warnings.warn(                                                                                                                                                                                              │
+│ INFO:     10.244.9.196:33552 - "POST /cluster HTTP/1.1" 200 OK                                                                                                                                                │
+│ INFO:     10.244.9.196:41960 - "POST /cluster HTTP/1.1" 200 OK                                                                                                                                                │
+│                                                                                                                                                                                                               │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
