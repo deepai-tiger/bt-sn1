@@ -1,0 +1,6 @@
+{
+  "w0/t2":   {"w_distilled": 0.0, "title_w_distilled": 2.0},
+  "w1/t2":   {"w_distilled": 1.0, "title_w_distilled": 2.0},
+  "w1/t3":   {"w_distilled": 1.0, "title_w_distilled": 3.0},
+  "w1.5/t2": {"w_distilled": 1.5, "title_w_distilled": 2.0}
+}
