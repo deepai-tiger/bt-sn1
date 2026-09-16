@@ -141,11 +141,19 @@ CONFIG: dict[str, object] = {
     # "none"      - push rejects back into their nearest cluster
     # "graded"    - the most noise-like `noise_bucket_frac` share into one
     #               bucket, the remainder as singletons
-    "noise_mode": "none",
+    #
+    # Singletons win on social by +0.025 (0.4501 against 0.4248 reclaiming, 9
+    # subsets), and the whole gain is NMI: 0.5640 -> 0.6198 with ARI flat at
+    # 0.28. That profile is also what the top submissions report on the real
+    # rounds -- NMI 0.60-0.63 against ARI 0.27-0.32 -- which is the outside
+    # evidence that this is the right shape rather than a local artefact.
+    "noise_mode": "singleton",
     # Extra points promoted to noise beyond the clusterer's own rejects, as a
-    # fraction of n. 0 trusts the clusterer. The top submissions all eject a
-    # large share by hand (25% on social, 40% on titles) rather than trusting
-    # it, so this is swept against them rather than assumed.
+    # fraction of n. The top submissions eject a large share by hand -- 25% on
+    # social, 40% on titles -- because their agglomerative cut has no noise
+    # label of its own to work from. We run the ground truth's own clusterer,
+    # so the reject set arrives already identified, and adding to it only
+    # dilutes it: 0.4501 at 0% against 0.4106 at 15% and 0.3743 at their 25%.
     "extra_noise_frac": 0.0,
     # Under "graded", the share of the noise set that goes to the shared bucket
     # instead of becoming singletons, taken most-noise-like first.
@@ -240,6 +248,8 @@ CONFIG: dict[str, object] = {
     # something we observe rather than control.
     "title_noise_mode": "none",
     "title_noise_reclaim_thr": 0.0,
+    "title_extra_noise_frac": 0.0,
+    "title_noise_bucket_frac": 0.5,
     "title_fuzzy_smooth": True,
 }
 

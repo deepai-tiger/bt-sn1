@@ -93,6 +93,12 @@ SHAPE = {
               "min_sep": 0.35, "skew": 0.85, "min_samples": None},
 }
 
+# The envelope the platform's twelve observed subsets span, with a little
+# headroom: clusters 34-49, noise 13.0-29.3%, largest cluster 252-907. A baked
+# subset outside it is not a hard round, it is a round the platform does not
+# hand out, so it is resampled rather than scored.
+ENVELOPE = {"size_max": 950, "clusters_min": 32, "noise_max": 0.33}
+
 
 def load_pool(names: list[str]) -> tuple[np.ndarray, np.ndarray]:
     """Texts plus their MiniLM embeddings, concatenated over sources."""
@@ -299,6 +305,7 @@ def main() -> None:
     parser.add_argument("--skew", type=float, action="append", default=None)
     parser.add_argument("--min-sep", type=float, action="append", default=None)
     parser.add_argument("--draws", type=int, default=3)
+    parser.add_argument("--max-attempts", type=int, default=4)
     parser.add_argument("--min-samples", type=int, default=None)
     args = parser.parse_args()
 
@@ -330,13 +337,33 @@ def main() -> None:
                 continue
             kind = "arxiv" if subset == "arxiv" else "social"
             pool_texts, pool_emb = pools[kind]
-            rng = random.Random(args.seed * 1000 + round_index * 10
-                                + (0 if subset == "arxiv" else subset))
-            indices, topics = build_subset(pool_texts, pool_emb, args.size,
-                                           SHAPE[kind], rng, taken[kind])
-            labels = ground_truth(pool_emb[indices], args.seed,
-                                  SHAPE[kind]["min_samples"])
-            info = describe(labels)
+            # Shape knobs get the aggregate right but individual draws still
+            # scatter, and the tail of that scatter is not harmless: a subset
+            # whose largest cluster holds a third of the batch rewards a
+            # strategy the platform never rewards. The knobs cannot exclude it,
+            # so resample against the envelope the platform's own twelve
+            # subsets span instead of accepting whatever comes out.
+            attempt = 0
+            while True:
+                rng = random.Random(args.seed * 1000 + round_index * 10
+                                    + (0 if subset == "arxiv" else subset)
+                                    + attempt * 7777)
+                trial = np.zeros_like(taken[kind]) | taken[kind]
+                indices, topics = build_subset(pool_texts, pool_emb, args.size,
+                                               SHAPE[kind], rng, trial)
+                labels = ground_truth(pool_emb[indices], args.seed,
+                                      SHAPE[kind]["min_samples"])
+                info = describe(labels)
+                inside = (info["cluster_size_max"] <= ENVELOPE["size_max"]
+                          and info["num_clusters"] >= ENVELOPE["clusters_min"]
+                          and info["noise_frac"] <= ENVELOPE["noise_max"])
+                if inside or attempt >= args.max_attempts:
+                    taken[kind] = trial
+                    break
+                print(f"{name}: rejected (max {info['cluster_size_max']}, "
+                      f"k {info['num_clusters']}, noise "
+                      f"{info['noise_frac']:.1%}), resampling", flush=True)
+                attempt += 1
             print(f"{name}: {info}", flush=True)
             path.write_text(json.dumps({
                 "name": name,
