@@ -56,6 +56,9 @@ SUBMISSION = Path(__file__).parent.parent / "champion-code" / "code_submission_v
 # characters, so this is a 2.5x larger model for the same budget.
 CJK_BASE = 19968
 BITS_PER_CHAR = 15
+# Leading sentinel for the sparse layout. Chosen so it cannot be mistaken for
+# a dense header, whose first word is the (small) subspace count.
+SPARSE_MAGIC = b"SPRS"
 
 # The cached right-hand side is built once at this width; any smaller `--dims`
 # is a prefix of it, because PCA components come out ordered by variance.
@@ -325,18 +328,44 @@ def pack_bits(values: np.ndarray, bits: int) -> bytes:
 
 def serialize(payload: dict, dims: int, word_buckets: int,
               char_buckets: int) -> bytes:
-    """Self-describing blob, so the submission needs no matching constants."""
+    """Self-describing blob, so the submission needs no matching constants.
+
+    Two layouts. The dense one stores a code block for every bucket, which
+    means the hash width and the character cost are the same number -- and
+    since fidelity is collision-bound, that coupling is what caps the whole
+    map. Widening the hash from 8192 to 16384 buckets lifts exact fidelity
+    0.5901 -> 0.6236, but the dense blob grows to 47,386 characters against a
+    ~32,000 budget, so it cannot be shipped.
+
+    The sparse layout stores only the surviving rows plus their indices.
+    Pruning already zeroes most rows, so this costs one index per kept row and
+    buys the right to hash into a much wider space than we could afford to
+    store. Indices go out sorted, as deltas, because a sorted index list has
+    far less entropy than the codes it accompanies.
+    """
     if payload["kind"] != "pq":
         raise SystemExit("only the pq format is serialized; scalar is for comparison")
-    header = np.array([payload["subspaces"], payload["prototypes"], dims,
-                       word_buckets, char_buckets], np.uint32).tobytes()
     # Sub-vectors of unit directions, so int8 over [-1, 1] costs ~0.004 per
     # component -- far below the error the direction quantization already has.
     books_q = np.clip(np.round(payload["books"] * 127.0), -127, 127).astype(np.int8)
-    return (header + books_q.tobytes()
+    codes = payload["codes"].astype(np.uint8)
+    mag = payload["mag"].astype(np.uint8)
+
+    if not payload.get("sparse"):
+        header = np.array([payload["subspaces"], payload["prototypes"], dims,
+                           word_buckets, char_buckets], np.uint32).tobytes()
+        return (header + books_q.tobytes()
+                + payload["levels"].astype(np.float32).tobytes()
+                + codes.tobytes() + mag.tobytes())
+
+    kept = np.flatnonzero(mag > 0).astype(np.int64)
+    deltas = np.diff(np.concatenate(([-1], kept))).astype(np.uint32)
+    header = np.array([payload["subspaces"], payload["prototypes"], dims,
+                       word_buckets, char_buckets, kept.size], np.uint32).tobytes()
+    return (SPARSE_MAGIC + header + books_q.tobytes()
             + payload["levels"].astype(np.float32).tobytes()
-            + payload["codes"].astype(np.uint8).tobytes()
-            + payload["mag"].astype(np.uint8).tobytes())
+            + deltas.tobytes()
+            + codes[kept].tobytes() + mag[kept].tobytes())
 
 
 def encode_chars(blob: bytes) -> str:
@@ -388,6 +417,9 @@ def main() -> None:
     parser.add_argument("--prune", type=float, default=0.0,
                         help="fraction of least useful rows to zero")
     parser.add_argument("--prune-by", choices=("norm", "energy"), default="norm")
+    parser.add_argument("--sparse", action="store_true",
+                        help="store only surviving rows plus their indices, "
+                             "so the hash width is not capped by the budget")
     parser.add_argument("--reddit", type=int, default=70000)
     parser.add_argument("--tweets", type=int, default=70000)
     parser.add_argument("--arxiv", type=int, default=60000)
@@ -460,6 +492,11 @@ def main() -> None:
     print(f"product-quantizing rows: {args.subspaces} subspaces x "
           f"{args.prototypes} prototypes")
     payload, W_hat = quantize_pq(W, args.subspaces, args.prototypes, args.seed)
+    payload["sparse"] = bool(args.sparse)
+    if args.sparse:
+        kept = int((payload["mag"] > 0).sum())
+        print(f"  sparse layout: storing {kept:,} of "
+              f"{args.word + args.char:,} rows")
 
     blob = serialize(payload, args.dims, args.word, args.char)
     compressed = lzma.compress(blob, preset=9 | lzma.PRESET_EXTREME)

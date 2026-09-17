@@ -62,7 +62,7 @@ def check_trailing_pad_tolerance() -> None:
     print("trailing pad tolerance: ok")
 
 
-def check_matrix_round_trip() -> None:
+def check_matrix_round_trip(sparse: bool = False) -> None:
     """Full path: a random matrix through quantize -> serialize -> decode."""
     rng = np.random.default_rng(2)
     word, char, dims, blocks, protos = 512, 256, 16, 4, 64
@@ -70,9 +70,15 @@ def check_matrix_round_trip() -> None:
     # Row norms spanning orders of magnitude, like a real fit.
     W = rng.normal(size=(rows, dims)).astype(np.float32)
     W *= np.exp(rng.normal(0, 2.0, size=rows)).astype(np.float32)[:, None]
-    W[rng.choice(rows, 40, replace=False)] = 0.0
+    # Most rows empty, as after pruning, and deliberately including both the
+    # first and last row: the sparse layout deltas indices against a sentinel,
+    # and an off-by-one there only shows up when an edge row survives.
+    W[rng.choice(rows, int(rows * 0.6), replace=False)] = 0.0
+    W[0] = rng.normal(size=dims)
+    W[-1] = rng.normal(size=dims)
 
     payload, approx = fit.quantize_pq(W, blocks, protos, seed=0)
+    payload["sparse"] = sparse
     blob = fit.serialize(payload, dims, word, char)
     text = fit.encode_chars(lzma.compress(blob, preset=9 | lzma.PRESET_EXTREME))
 
@@ -90,7 +96,9 @@ def check_matrix_round_trip() -> None:
     scale = np.abs(approx).max()
     error = np.abs(matrix - approx).max() / scale
     assert error < 0.02, f"decode mismatch: max relative error {error:.4f}"
-    print(f"matrix round trip: ok (max relative error {error:.5f})")
+    layout = "sparse" if sparse else "dense"
+    print(f"matrix round trip ({layout}): ok "
+          f"(max relative error {error:.5f}, {len(text):,} chars)")
 
     zero_rows = np.abs(approx).sum(1) == 0
     assert np.abs(matrix[zero_rows]).sum() == 0, "zero rows did not survive"
@@ -112,6 +120,7 @@ def check_absent_blob() -> None:
 if __name__ == "__main__":
     check_char_packing()
     check_trailing_pad_tolerance()
-    check_matrix_round_trip()
+    check_matrix_round_trip(sparse=False)
+    check_matrix_round_trip(sparse=True)
     check_absent_blob()
     print("all blob format checks passed")
