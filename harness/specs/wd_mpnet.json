@@ -1,0 +1,12 @@
+{
+  "wd 1.0 / t 2.0 (current)": {},
+  "wd 0.0 / t 0.0":  {"w_distilled": 0.0, "title_w_distilled": 0.0},
+  "wd 0.5 / t 2.0":  {"w_distilled": 0.5},
+  "wd 2.0 / t 2.0":  {"w_distilled": 2.0},
+  "wd 3.0 / t 2.0":  {"w_distilled": 3.0},
+  "wd 1.0 / t 1.0":  {"title_w_distilled": 1.0},
+  "wd 1.0 / t 3.0":  {"title_w_distilled": 3.0},
+  "wd 1.0 / t 4.0":  {"title_w_distilled": 4.0},
+  "wd 2.0 / t 3.0":  {"w_distilled": 2.0, "title_w_distilled": 3.0},
+  "wd 3.0 / t 4.0":  {"w_distilled": 3.0, "title_w_distilled": 4.0}
+}

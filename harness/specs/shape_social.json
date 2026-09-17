@@ -1,0 +1,20 @@
+{
+  "current (reclaim, no eject)":      {"noise_mode": "none",      "extra_noise_frac": 0.0},
+  "singleton, no eject":              {"noise_mode": "singleton", "extra_noise_frac": 0.0},
+  "bucket, no eject":                 {"noise_mode": "bucket",    "extra_noise_frac": 0.0},
+
+  "champion shape: singleton 25%":    {"noise_mode": "singleton", "extra_noise_frac": 0.25},
+  "singleton 15%":                    {"noise_mode": "singleton", "extra_noise_frac": 0.15},
+  "singleton 20%":                    {"noise_mode": "singleton", "extra_noise_frac": 0.20},
+  "singleton 30%":                    {"noise_mode": "singleton", "extra_noise_frac": 0.30},
+
+  "bucket 15%":                       {"noise_mode": "bucket",    "extra_noise_frac": 0.15},
+  "bucket 20%":                       {"noise_mode": "bucket",    "extra_noise_frac": 0.20},
+  "bucket 25%":                       {"noise_mode": "bucket",    "extra_noise_frac": 0.25},
+
+  "graded 20%, bucket half":          {"noise_mode": "graded", "extra_noise_frac": 0.20, "noise_bucket_frac": 0.5},
+  "graded 25%, bucket half":          {"noise_mode": "graded", "extra_noise_frac": 0.25, "noise_bucket_frac": 0.5},
+  "graded 25%, bucket third":         {"noise_mode": "graded", "extra_noise_frac": 0.25, "noise_bucket_frac": 0.33},
+  "graded 25%, bucket two thirds":    {"noise_mode": "graded", "extra_noise_frac": 0.25, "noise_bucket_frac": 0.67},
+  "graded 30%, bucket half":          {"noise_mode": "graded", "extra_noise_frac": 0.30, "noise_bucket_frac": 0.5}
+}

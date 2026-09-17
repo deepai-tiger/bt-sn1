@@ -1,0 +1,43 @@
+{
+  "svd16": {
+    "noise_mode": "graded",
+    "title_noise_mode": "graded",
+    "reduce_dim": 16
+  },
+  "svd24": {
+    "noise_mode": "graded",
+    "title_noise_mode": "graded",
+    "reduce_dim": 24
+  },
+  "svd32": {
+    "noise_mode": "graded",
+    "title_noise_mode": "graded",
+    "reduce_dim": 32
+  },
+  "svd40": {
+    "noise_mode": "graded",
+    "title_noise_mode": "graded",
+    "reduce_dim": 40
+  },
+  "svd40_frac0.3": {
+    "noise_mode": "graded",
+    "title_noise_mode": "graded",
+    "reduce_dim": 40,
+    "noise_bucket_frac": 0.3,
+    "title_noise_bucket_frac": 0.3
+  },
+  "svd40_frac0.7": {
+    "noise_mode": "graded",
+    "title_noise_mode": "graded",
+    "reduce_dim": 40,
+    "noise_bucket_frac": 0.7,
+    "title_noise_bucket_frac": 0.7
+  },
+  "svd40_frac0.9": {
+    "noise_mode": "graded",
+    "title_noise_mode": "graded",
+    "reduce_dim": 40,
+    "noise_bucket_frac": 0.9,
+    "title_noise_bucket_frac": 0.9
+  }
+}

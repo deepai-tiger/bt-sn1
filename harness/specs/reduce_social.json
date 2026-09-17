@@ -1,0 +1,11 @@
+{
+  "svd 80 (current)":  {"reduce_mode": "svd",      "reduce_dim": 80},
+  "svd 40":            {"reduce_mode": "svd",      "reduce_dim": 40},
+  "svd 20":            {"reduce_mode": "svd",      "reduce_dim": 20},
+  "svd 10":            {"reduce_mode": "svd",      "reduce_dim": 10},
+  "svd 5":             {"reduce_mode": "svd",      "reduce_dim": 5},
+  "spectral 5":        {"reduce_mode": "spectral", "reduce_dim": 5},
+  "spectral 8":        {"reduce_mode": "spectral", "reduce_dim": 8},
+  "spectral 12":       {"reduce_mode": "spectral", "reduce_dim": 12},
+  "spectral 20":       {"reduce_mode": "spectral", "reduce_dim": 20}
+}

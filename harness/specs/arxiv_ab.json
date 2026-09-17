@@ -1,0 +1,6 @@
+{
+  "previous(no blob, singleton, 2it)": {"title_w_distilled": 0.0, "title_noise_mode": "singleton", "title_smooth_iters": 2},
+  "blob only":                         {"title_noise_mode": "singleton", "title_smooth_iters": 2},
+  "blob + bucket":                     {"title_smooth_iters": 2},
+  "current (blob + bucket + 6it)":     {}
+}

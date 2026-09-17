@@ -1,0 +1,12 @@
+{
+  "mine: hdbscan+bucket": {},
+  "v2: link80+40%singleton":  {"cluster_mode": "linkage", "k_mode": "fixed", "k_fixed": 80, "title_noise_mode": "singleton", "extra_noise_frac": 0.4},
+  "link40+40%singleton":      {"cluster_mode": "linkage", "k_mode": "fixed", "k_fixed": 40, "title_noise_mode": "singleton", "extra_noise_frac": 0.4},
+  "link120+40%singleton":     {"cluster_mode": "linkage", "k_mode": "fixed", "k_fixed": 120, "title_noise_mode": "singleton", "extra_noise_frac": 0.4},
+  "link80+20%singleton":      {"cluster_mode": "linkage", "k_mode": "fixed", "k_fixed": 80, "title_noise_mode": "singleton", "extra_noise_frac": 0.2},
+  "link80+40%bucket":         {"cluster_mode": "linkage", "k_mode": "fixed", "k_fixed": 80, "extra_noise_frac": 0.4},
+  "link80+bucket":            {"cluster_mode": "linkage", "k_mode": "fixed", "k_fixed": 80},
+  "hdbscan+40%extra_bucket":  {"extra_noise_frac": 0.4},
+  "hdbscan+20%extra_bucket":  {"extra_noise_frac": 0.2},
+  "link_modularity+bucket":   {"cluster_mode": "linkage", "k_mode": "modularity"}
+}

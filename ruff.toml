@@ -1,0 +1,28 @@
+target-version = "py312"
+line-length = 100
+
+# The Apex CLI export is a corrupted artefact kept for reference only: every
+# line is padded to 200 characters and twelve are truncated mid-expression, so
+# it is not valid Python and never will be.
+extend-exclude = [
+    "champion-code/code_submission_v1.apex-export.py",
+    "base-code",  # provided by the competition, left untouched
+    "build",      # generated minified output
+]
+
+[lint]
+select = ["F", "E", "W", "I", "UP", "B", "C4"]
+ignore = [
+    "E501",    # long lines are fine in the feature-extraction code
+    "B904",    # not raising from inside except is deliberate in the fallbacks
+    "C408",    # dict(...) reads better where it is splatted into **kwargs
+]
+
+[lint.per-file-ignores]
+# The submission must never fail a request, so bare `except Exception` guards
+# every optional stage.
+# The BLAS thread limits have to be set before numpy is imported, so the
+# imports cannot all sit at the top of the file.
+"champion-code/code_submission_v1.py" = ["BLE001", "E402"]
+"harness/reference_champion.py" = ["BLE001", "E741", "E402", "B905"]
+"harness/collect_data.py" = ["B905"]

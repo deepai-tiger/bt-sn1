@@ -1,0 +1,6 @@
+{
+  "current":                  {},
+  "cw 0.25":                  {"title_char_weight": 0.25},
+  "cw 0.25 + rd 20 + mcs 9":  {"title_char_weight": 0.25, "title_reduce_dim": 20, "title_min_cluster_size": 9},
+  "cw 0.25 + mcs 9 + wd 3":   {"title_char_weight": 0.25, "title_min_cluster_size": 9, "title_w_distilled": 3.0}
+}
