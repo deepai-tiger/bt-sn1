@@ -306,6 +306,8 @@ Two lessons worth keeping in mind, since both bugs came from the same place:
 
 ## Files
 
+| `quant_ab.py` | fidelity per *character* for PQ vs per-dimension codes |
+
 | file | role |
 |---|---|
 | `collect_data.py` | pulls Reddit / X / arXiv parquet shards, keeps a coarse topic label per row |
@@ -368,6 +370,13 @@ learn a coarse sketch. Widening the hash is the fix, and the character limit
 forbids it: the bucket count sets the row count, which sets the size. Adding
 training data no longer moves fidelity, which is what being collision-bound
 rather than data-bound looks like.
+
+The hash has since been widened 4x -- the limit only bound because the format
+stored every bucket, and a sparse layout does not (see "It was the hash width"
+below). Fidelity went 0.5705 -> 0.6671 and the score moved +0.004, so the
+conclusion this section reaches about *representation quality being the only
+lever left* turned out to be wrong in the part that matters. Representation
+quality had room, we took it, and the score barely responded.
 
 ### What a perfect blob would be worth, and why ours is worth 0.008
 
@@ -436,6 +445,100 @@ refit lands at 0.4284 against the shipped blob's 0.4293 -- the same number.
 So the binding constraint is the linear bag-of-n-grams model itself, not the
 50,000 characters and not the packing. Beating it needs a different functional
 form rather than a bigger one, which is the open question this leaves.
+
+### It was the hash width, and fixing it settles the blob question
+
+The paragraph above is right that characters are not the constraint, but it
+drew the wrong conclusion from that. The map was not capacity-bound in its
+*functional form*, it was capacity-bound in its *hash*: 8192 word plus 2048
+char buckets have to hold millions of distinct n-grams, so every bucket mixes
+hundreds of unrelated terms. Doubling the width lifts the unquantized model
+from 0.5901 to 0.6236, which the table above could not see because every row in
+it holds the width fixed.
+
+The reason the width was fixed is that the old format stored a code block for
+every bucket, so the hash width and the character cost were the same number.
+A wider hash could be fitted but not shipped -- dense at 16384 buckets is
+47,386 characters against a ~31,000 budget. `--sparse` stores only the rows
+that survive pruning, plus their indices as sorted deltas, which decouples the
+two: the width is then free and only the *kept row count* is paid for.
+
+That plus energy pruning, which matters far more at the harder pruning rates a
+wide hash needs (row norm alone collapses to 0.4568 where energy holds 0.6671):
+
+| blob | rows / hash width | characters | fidelity |
+|---|---|---|---|
+| previously shipped | 4,096 / 8,192 | 25,893 | 0.5705 |
+| sparse, energy-pruned | 4,096 / 16,384 | 24,399 | 0.6478 |
+| sparse, energy-pruned | 4,915 / 16,384 | 28,357 | **0.6671** |
+
+0.6671 is within 0.013 of the unquantized model of the same width, so the blob
+is now neither collision-bound nor quantization-bound, and the remaining
+0.013 is all that better packing could ever buy.
+
+End to end that is worth **+0.004** (0.3509 -> 0.3549 on 24 held-out subsets),
+and `w_distilled` still does not want to rise above 0.5. A +0.097 fidelity gain
+buying +0.004 of score is the useful result here: it confirms from the other
+direction what `teacher_oracle.py` implies, that the pipeline is not
+blob-limited in any regime a distilled map can reach.
+
+Two things were checked and rejected along the way, both worth not repeating:
+
+* **Per-dimension 2- and 4-bit codes instead of PQ.** The top-2 submission
+  ships `W,X,J = 8192,4096,48` at 2 bits per element, and the hope was that
+  such codes -- mostly the zero level after pruning -- would compress where a
+  near-uniform 8-bit PQ index cannot. They do compress better, but not nearly
+  enough to pay for the fidelity they give up. At a matched ~28,400 characters
+  PQ scores 0.6671 against 0.6234 for 4-bit and 0.6121 for 2-bit at 48 dims.
+  `quant_ab.py` is that comparison; the existing format choice was correct.
+* **A wider hash still.** The gram matrix is already 2.1GB at 16384 buckets and
+  grows as the square, so 32768 needs 8.6GB and cannot be formed here. Going
+  wider needs a solver that never forms the gram, not a bigger machine.
+
+## The gap to the top submissions is entirely ARI
+
+The score is `(max(0, ARI) + NMI) / 2`, and reading the two halves separately
+localizes the whole deficit. From `champion-code/180373/metadata.json`, which
+is the real platform scoring of a 0.4467 submission, against ours on 24
+held-out subsets:
+
+| | ARI | NMI | combined |
+|---|---|---|---|
+| top-2 submission (platform) | 0.257 - 0.318, mean **0.28** | 0.60 - 0.63 | 0.4467 |
+| ours (replica holdout) | **0.147** | 0.562 | 0.3549 |
+
+NMI is 0.05 behind; ARI is 0.13 behind, and ARI is half the score. Matching
+their ARI while keeping our own NMI would score 0.42.
+
+The mechanism is visible in the prediction shape. We emit ~2,375 clusters with
+a median size of 1 on 5,000 points, because HDBSCAN rejects ~48% of the batch
+and `singleton` gives each reject its own label. The ground truth has 39
+clusters and 25.6% noise. ARI counts pairs, so 2,300 singletons contribute
+almost no true pairs while the real clusters they came from lose theirs; NMI,
+which is not chance-adjusted, barely notices. That is exactly the 0.147/0.562
+profile.
+
+The tempting conclusion is that the output shape is the bug, and it is not.
+Trading shape moves the two halves against each other at roughly constant sum:
+
+| noise shape | combined | ARI | NMI | k |
+|---|---|---|---|---|
+| singleton (shipped) | **0.3549** | 0.147 | 0.562 | 2,375 |
+| graded 0.5 + SVD 40 | 0.3515 | 0.175 | 0.529 | 1,184 |
+
+Graded buys +0.027 ARI and pays 0.034 NMI. On six `subset_1` rounds it looked
+like a clear +0.010 win (0.3739 against 0.3637) and it reversed on the full 24,
+which is worth remembering as the cheapest available way to fool yourself here:
+six rounds is not enough to separate 0.01.
+
+So the champion is not winning by shaping its output differently. It reaches
+0.28 ARI *and* 0.61 NMI, which means its clustered core is genuinely better
+partitioned -- it rejects less and places what it keeps more correctly. Two
+measurements say our pipeline cannot get there by improving features alone:
+perfect teacher embeddings in our pipeline reach only 0.388 with SVD (0.4088
+with spectral), and making the blob two-thirds of the way to perfect moved the
+score +0.004. The remaining work is in how the clustered core is built, not in
+what is fed to it.
 
 ## What the v2 champion export was worth
 

@@ -1,0 +1,60 @@
+{
+  "ms5": {
+    "noise_mode": "graded",
+    "title_noise_mode": "graded",
+    "hdbscan_min_samples": 5
+  },
+  "ms10": {
+    "noise_mode": "graded",
+    "title_noise_mode": "graded",
+    "hdbscan_min_samples": 10
+  },
+  "ms15": {
+    "noise_mode": "graded",
+    "title_noise_mode": "graded",
+    "hdbscan_min_samples": 15
+  },
+  "ms25": {
+    "noise_mode": "graded",
+    "title_noise_mode": "graded",
+    "hdbscan_min_samples": 25
+  },
+  "spectral12": {
+    "noise_mode": "graded",
+    "title_noise_mode": "graded",
+    "reduce_mode": "spectral",
+    "reduce_dim": 12
+  },
+  "spectral24": {
+    "noise_mode": "graded",
+    "title_noise_mode": "graded",
+    "reduce_mode": "spectral",
+    "reduce_dim": 24
+  },
+  "spectral48": {
+    "noise_mode": "graded",
+    "title_noise_mode": "graded",
+    "reduce_mode": "spectral",
+    "reduce_dim": 48
+  },
+  "svd40": {
+    "noise_mode": "graded",
+    "title_noise_mode": "graded",
+    "reduce_dim": 40
+  },
+  "svd120": {
+    "noise_mode": "graded",
+    "title_noise_mode": "graded",
+    "reduce_dim": 120
+  },
+  "eps0.05": {
+    "noise_mode": "graded",
+    "title_noise_mode": "graded",
+    "hdbscan_epsilon": 0.05
+  },
+  "leaf": {
+    "noise_mode": "graded",
+    "title_noise_mode": "graded",
+    "hdbscan_selection": "leaf"
+  }
+}
