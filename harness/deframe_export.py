@@ -59,7 +59,11 @@ def main() -> None:
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
 
-    code, suspect, panel = deframe(args.export.read_text(encoding="utf-8"))
+    # Exports of packed blobs are not always valid UTF-8 -- the CLI mangles a
+    # few of the high codepoints on the way out. Recovering the surrounding
+    # code is still worth doing, and the replacement chars mark the damage.
+    text = args.export.read_bytes().decode("utf-8", errors="replace")
+    code, suspect, panel = deframe(text)
     source = "\n".join(code) + "\n"
     args.out.write_text(source, encoding="utf-8")
 
