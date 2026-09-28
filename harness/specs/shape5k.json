@@ -1,0 +1,15 @@
+{
+ "shipped_singleton": {},
+ "large_hash_auto": {
+  "large_batch_threshold": 0
+ },
+ "large_svd_auto": {
+  "large_batch_threshold": 0,
+  "large_batch_features": "svd"
+ },
+ "large_svd_k26": {
+  "large_batch_threshold": 0,
+  "large_batch_features": "svd",
+  "large_batch_k": 26
+ }
+}

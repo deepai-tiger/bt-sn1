@@ -30,9 +30,10 @@ Pipeline
              kNN-graph modularity
           -> merge foreign-script clusters, enforce the size floor, assign noise
 
-    n > 8000 -> hashed lexical + distilled features
-             -> MiniBatchKMeans with the official baseline's adaptive k
-             -> singleton the least-supported 20%
+    n > 16000 -> BM25-weighted hashed n-grams reduced by SVD, + distilled
+              -> kNN smoothing while n <= 25000
+              -> MiniBatchKMeans with the official baseline's adaptive k
+              -> singleton the least-supported 20%
 
 Everything is gated on a wall-clock deadline and every stage has a fallback, so
 the server degrades rather than failing: the 90-second budget is a hard limit.
@@ -85,13 +86,29 @@ CONFIG: dict[str, object] = {
     # The current miner-facing specification allows 1K-50K texts. The
     # manifold path is tuned for the 5K batches observed in platform metadata
     # and contains exact cosine kNN plus an O(n^2) linkage fallback; neither is
-    # safe near 50K. Above this boundary use the scalable path below: hashed
-    # lexical features + the distilled map + MiniBatchKMeans. The threshold is
-    # deliberately above every observed platform batch, so normal rounds keep
-    # the higher-scoring path while documented large rounds cannot time out.
-    "large_batch_threshold": 8000,
+    # safe near 50K. Above this boundary use the scalable path below.
+    #
+    # The boundary sits where the manifold path stops fitting the budget, not
+    # lower: on 15K replica rounds it scores 0.3585 / 0.3475 (topics scaled
+    # with n / held fixed) against 0.2937 / 0.2780 for the best large-path
+    # variant, and it runs 25.4s at 15K on a CPU the platform is ~2x slower
+    # than. HDBSCAN (9.0s) and the LSA block (8.4s) are most of that.
+    "large_batch_threshold": 16000,
     "large_batch_max_clusters": 100,
     "large_batch_noise_frac": 0.20,
+    # 1.0 beat 2.0 on both 15K replicas (0.2852 / 0.2751 against 0.2691 / 0.2655).
+    "large_batch_teacher_weight": 1.0,
+    # 0 = the official baseline's sqrt(n/2), capped at large_batch_max_clusters.
+    "large_batch_k": 0,
+    # "hash" (the 0.4311 build; 0.2586 / 0.2509 on the 15K replicas) | "svd"
+    # (0.2691 / 0.2655 at the same settings); see large_batch_features.
+    "large_batch_features": "svd",
+    "large_batch_svd_dim": 128,
+    "large_batch_drop": 1,
+    # Exact kNN smoothing is O(n^2); only affordable on the smaller large rounds.
+    # Two passes are the single best large-path change (0.2937 / 0.2780).
+    "large_batch_smooth_iters": 2,
+    "large_batch_smooth_max_n": 25000,
 
     # What the ground-truth pipeline does, read off the platform's own metadata:
     # no ground-truth cluster in any subset has fewer than 25 members.
@@ -1281,6 +1298,50 @@ def fallback_labels(docs: list[str]) -> np.ndarray:
         return np.zeros(len(docs), np.int64)
 
 
+def large_batch_features(docs: list[str]):
+    """Features for the large-batch path, all linear in n.
+
+    "hash" is raw log-TF over hashed word n-grams plus the teacher map, which
+    is what the 0.4311 submission ran. "svd" BM25-weights the same hashed
+    counts and reduces them by randomized SVD first, the step that makes the
+    5K path's lexical block work: raw sparse TF puts every rare n-gram on its
+    own axis, so k-means distances are dominated by vocabulary accidents
+    rather than topic. Both stay bounded in memory at the documented 50K.
+    """
+    from sklearn.feature_extraction.text import HashingVectorizer
+
+    counts = HashingVectorizer(
+        n_features=32768, ngram_range=(1, 2), analyzer="word",
+        stop_words="english", alternate_sign=False, norm=None,
+        dtype=np.float32).transform(docs)
+    teacher = distilled_features(docs)
+    weight = float(CONFIG["large_batch_teacher_weight"])
+
+    if str(CONFIG["large_batch_features"]) == "hash":
+        counts.data = np.log1p(counts.data).astype(np.float32)
+        lexical = normalize(counts)
+        if teacher is not None and weight > 0:
+            return sparse_hstack([lexical, csr_matrix(teacher * weight)],
+                                 format="csr")
+        return lexical
+
+    lexical = normalize(bm25_weight(counts))
+    dim = int(min(int(CONFIG["large_batch_svd_dim"]), lexical.shape[1] - 1,
+                  len(docs) - 1))
+    dense = TruncatedSVD(dim, algorithm="randomized", n_iter=4,
+                         random_state=_RNG_SEED).fit_transform(lexical)
+    dense = drop_top_components(dense, int(CONFIG["large_batch_drop"]))
+    blocks = [normalize(dense)]
+    if teacher is not None and weight > 0:
+        blocks.append(normalize(teacher) * weight)
+    Z = normalize(np.hstack(blocks)).astype(np.float32)
+    smooth_iters = int(CONFIG["large_batch_smooth_iters"])
+    if smooth_iters > 0 and len(docs) <= int(CONFIG["large_batch_smooth_max_n"]):
+        Z = knn_smooth(Z, int(CONFIG["smooth_k"]), float(CONFIG["smooth_alpha"]),
+                       smooth_iters)
+    return Z
+
+
 def cluster_large_batch(docs: list[str]) -> np.ndarray:
     """Bounded-memory path for the documented maximum of 50K texts.
 
@@ -1297,24 +1358,11 @@ def cluster_large_batch(docs: list[str]) -> np.ndarray:
     5K path without creating a quadratic-size false noise bucket.
     """
     try:
-        from sklearn.feature_extraction.text import HashingVectorizer
-
-        lexical = HashingVectorizer(
-            n_features=32768, ngram_range=(1, 2), analyzer="word",
-            stop_words="english", alternate_sign=False, norm=None,
-            dtype=np.float32).transform(docs)
-        lexical.data = np.log1p(lexical.data).astype(np.float32)
-        lexical = normalize(lexical)
-
-        teacher = distilled_features(docs)
-        features = lexical
-        if teacher is not None:
-            features = sparse_hstack(
-                [lexical, csr_matrix(teacher * 2.0)], format="csr")
-
+        features = large_batch_features(docs)
         n = len(docs)
-        k = max(2, min(int(np.sqrt(n / 2.0)),
-                       int(CONFIG["large_batch_max_clusters"])))
+        k = int(CONFIG["large_batch_k"]) or min(
+            int(np.sqrt(n / 2.0)), int(CONFIG["large_batch_max_clusters"]))
+        k = max(2, min(k, n - 1))
         model = MiniBatchKMeans(
             k, random_state=_RNG_SEED, n_init=3, batch_size=2048,
             max_iter=100, max_no_improvement=10)

@@ -1,0 +1,15 @@
+{
+ "shipped_0.4311_large": {
+  "large_batch_threshold": 0,
+  "large_batch_features": "hash",
+  "large_batch_teacher_weight": 2.0,
+  "large_batch_smooth_iters": 0
+ },
+ "new_large_default": {
+  "large_batch_threshold": 0
+ },
+ "new_large_teacher2": {
+  "large_batch_threshold": 0,
+  "large_batch_teacher_weight": 2.0
+ }
+}

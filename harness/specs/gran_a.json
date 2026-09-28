@@ -1,0 +1,8 @@
+{
+ "extra5": {
+  "extra_noise_frac": 0.05
+ },
+ "extra10": {
+  "extra_noise_frac": 0.1
+ }
+}

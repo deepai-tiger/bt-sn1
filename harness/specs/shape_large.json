@@ -1,0 +1,47 @@
+{
+ "shipped_hash_auto": {
+  "large_batch_threshold": 0
+ },
+ "svd_auto": {
+  "large_batch_threshold": 0,
+  "large_batch_features": "svd"
+ },
+ "svd_k60": {
+  "large_batch_threshold": 0,
+  "large_batch_features": "svd",
+  "large_batch_k": 60
+ },
+ "svd_k150": {
+  "large_batch_threshold": 0,
+  "large_batch_features": "svd",
+  "large_batch_k": 150
+ },
+ "svd_noise15": {
+  "large_batch_threshold": 0,
+  "large_batch_features": "svd",
+  "large_batch_noise_frac": 0.15
+ },
+ "svd_noise25": {
+  "large_batch_threshold": 0,
+  "large_batch_features": "svd",
+  "large_batch_noise_frac": 0.25
+ },
+ "svd_teacher1": {
+  "large_batch_threshold": 0,
+  "large_batch_features": "svd",
+  "large_batch_teacher_weight": 1.0
+ },
+ "svd_teacher3": {
+  "large_batch_threshold": 0,
+  "large_batch_features": "svd",
+  "large_batch_teacher_weight": 3.0
+ },
+ "svd_smooth2": {
+  "large_batch_threshold": 0,
+  "large_batch_features": "svd",
+  "large_batch_smooth_iters": 2
+ },
+ "hdbscan_path": {
+  "large_batch_threshold": 1000000000
+ }
+}
