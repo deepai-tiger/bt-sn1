@@ -1,0 +1,15 @@
+{
+  "ship_singleton": {},
+  "reclaim": {
+    "noise_mode": "none",
+    "title_noise_mode": "none"
+  },
+  "bucket": {
+    "noise_mode": "bucket",
+    "title_noise_mode": "bucket"
+  },
+  "graded_0.5": {
+    "noise_mode": "graded",
+    "title_noise_mode": "graded"
+  }
+}

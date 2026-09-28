@@ -1,0 +1,6 @@
+{
+  "w_off": {"w_distilled": 0.0},
+  "w_1.0": {"w_distilled": 1.0},
+  "w_2.0": {"w_distilled": 2.0},
+  "w_4.0": {"w_distilled": 4.0}
+}

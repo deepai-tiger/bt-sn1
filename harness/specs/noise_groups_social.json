@@ -1,0 +1,10 @@
+{
+  "bucket(G=1)": {"noise_mode": "bucket"},
+  "sub_G4":   {"noise_groups": 4},
+  "sub_G16":  {"noise_groups": 16},
+  "sub_G64":  {"noise_groups": 64},
+  "sub_G250": {"noise_groups": 250},
+  "sub_G600": {"noise_groups": 600},
+  "singleton": {"noise_mode": "singleton"},
+  "none": {"noise_mode": "none"}
+}

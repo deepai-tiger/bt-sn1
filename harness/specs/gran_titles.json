@@ -1,0 +1,9 @@
+{
+  "mcs 25 (current)": {"title_min_cluster_size": 25},
+  "mcs 20":           {"title_min_cluster_size": 20},
+  "mcs 16":           {"title_min_cluster_size": 16},
+  "mcs 12":           {"title_min_cluster_size": 12},
+  "mcs 9":            {"title_min_cluster_size": 9},
+  "mcs 7":            {"title_min_cluster_size": 7},
+  "mcs 5":            {"title_min_cluster_size": 5}
+}

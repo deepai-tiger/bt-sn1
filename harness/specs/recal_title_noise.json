@@ -1,0 +1,12 @@
+{
+  "base (bucket)":      {},
+  "singleton":          {"title_noise_mode": "singleton"},
+  "none":               {"title_noise_mode": "none"},
+  "reclaim0.3":         {"title_noise_reclaim_thr": 0.3},
+  "reclaim0.5":         {"title_noise_reclaim_thr": 0.5},
+  "reclaim0.7":         {"title_noise_reclaim_thr": 0.7},
+  "none+mcs18":         {"title_noise_mode": "none", "title_min_cluster_size": 18},
+  "none+mcs32":         {"title_noise_mode": "none", "title_min_cluster_size": 32},
+  "none+w3":            {"title_noise_mode": "none", "title_w_distilled": 3.0},
+  "none+w1":            {"title_noise_mode": "none", "title_w_distilled": 1.0}
+}

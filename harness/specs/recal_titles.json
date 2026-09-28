@@ -1,0 +1,22 @@
+{
+  "base":           {},
+  "tdim6":          {"title_reduce_dim": 6},
+  "tdim16":         {"title_reduce_dim": 16},
+  "tdim24":         {"title_reduce_dim": 24},
+  "tknn15":         {"title_spectral_knn": 15},
+  "tknn40":         {"title_spectral_knn": 40},
+  "tsm_a0.15":      {"title_smooth_alpha": 0.15},
+  "tsm_a0.5":       {"title_smooth_alpha": 0.5},
+  "tsm_it4":        {"title_smooth_iters": 4},
+  "tsm_k20":        {"title_smooth_k": 20},
+  "tsm_k50":        {"title_smooth_k": 50},
+  "tdrop1":         {"title_drop_components": 1},
+  "tdrop3":         {"title_drop_components": 3},
+  "tchar0.3":       {"title_char_weight": 0.3},
+  "tchar0.6":       {"title_char_weight": 0.6},
+  "tmcs18":         {"title_min_cluster_size": 18},
+  "tmcs32":         {"title_min_cluster_size": 32},
+  "tppmi0.8":       {"title_w_ppmi": 0.8},
+  "tppmi1.6":       {"title_w_ppmi": 1.6},
+  "tsvd_dim64":     {"title_reduce_mode": "svd", "title_reduce_dim": 64}
+}

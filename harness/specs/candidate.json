@@ -1,0 +1,8 @@
+{
+  "shipped": {},
+  "cand_svd40_graded": {
+    "noise_mode": "graded",
+    "title_noise_mode": "graded",
+    "reduce_dim": 40
+  }
+}

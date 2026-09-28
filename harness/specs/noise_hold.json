@@ -1,0 +1,5 @@
+{
+  "reclaim both (shipped v3)":   {"noise_mode": "none",      "title_noise_mode": "none"},
+  "singleton social only":       {"noise_mode": "singleton", "title_noise_mode": "none"},
+  "singleton both":              {"noise_mode": "singleton", "title_noise_mode": "singleton"}
+}

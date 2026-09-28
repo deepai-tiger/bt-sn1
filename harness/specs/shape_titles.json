@@ -1,0 +1,19 @@
+{
+  "current (reclaim, no eject)":   {"title_noise_mode": "none",      "title_extra_noise_frac": 0.0},
+  "singleton, no eject":           {"title_noise_mode": "singleton", "title_extra_noise_frac": 0.0},
+
+  "champion shape: singleton 40%": {"title_noise_mode": "singleton", "title_extra_noise_frac": 0.40},
+  "singleton 25%":                 {"title_noise_mode": "singleton", "title_extra_noise_frac": 0.25},
+  "singleton 30%":                 {"title_noise_mode": "singleton", "title_extra_noise_frac": 0.30},
+  "singleton 35%":                 {"title_noise_mode": "singleton", "title_extra_noise_frac": 0.35},
+
+  "bucket 25%":                    {"title_noise_mode": "bucket",    "title_extra_noise_frac": 0.25},
+  "bucket 30%":                    {"title_noise_mode": "bucket",    "title_extra_noise_frac": 0.30},
+
+  "graded 25%, bucket half":       {"title_noise_mode": "graded", "title_extra_noise_frac": 0.25, "title_noise_bucket_frac": 0.5},
+  "graded 30%, bucket half":       {"title_noise_mode": "graded", "title_extra_noise_frac": 0.30, "title_noise_bucket_frac": 0.5},
+  "graded 30%, bucket third":      {"title_noise_mode": "graded", "title_extra_noise_frac": 0.30, "title_noise_bucket_frac": 0.33},
+  "graded 35%, bucket half":       {"title_noise_mode": "graded", "title_extra_noise_frac": 0.35, "title_noise_bucket_frac": 0.5},
+  "graded 40%, bucket half":       {"title_noise_mode": "graded", "title_extra_noise_frac": 0.40, "title_noise_bucket_frac": 0.5},
+  "graded 40%, bucket third":      {"title_noise_mode": "graded", "title_extra_noise_frac": 0.40, "title_noise_bucket_frac": 0.33}
+}

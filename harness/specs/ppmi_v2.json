@@ -1,0 +1,8 @@
+{
+  "window (current)":     {},
+  "document":             {"ppmi_cooccur": "document"},
+  "document_v6000":       {"ppmi_cooccur": "document", "ppmi_max_features": 6000},
+  "document_dim96":       {"ppmi_cooccur": "document", "ppmi_dim": 96},
+  "window_v6000":         {"ppmi_max_features": 6000},
+  "window_dim96":         {"ppmi_dim": 96}
+}

@@ -1,0 +1,8 @@
+{
+ "ms10": {
+  "hdbscan_min_samples": 10
+ },
+ "ms20": {
+  "hdbscan_min_samples": 20
+ }
+}

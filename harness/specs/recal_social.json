@@ -1,0 +1,17 @@
+{
+  "base":            {},
+  "smooth_a0.15":    {"smooth_alpha": 0.15},
+  "smooth_a0.4":     {"smooth_alpha": 0.4},
+  "smooth_it4":      {"smooth_iters": 4},
+  "smooth_it12":     {"smooth_iters": 12},
+  "smooth_k20":      {"smooth_k": 20},
+  "drop0":           {"drop_components": 0},
+  "drop2":           {"drop_components": 2},
+  "dim48":           {"reduce_dim": 48},
+  "dim120":          {"reduce_dim": 120},
+  "ppmi_w0.8":       {"w_ppmi": 0.8},
+  "ppmi_w1.6":       {"w_ppmi": 1.6},
+  "char_w0.3":       {"char_weight": 0.3},
+  "char_w0.6":       {"char_weight": 0.6},
+  "spectral":        {"reduce_mode": "spectral", "reduce_dim": 12}
+}
