@@ -120,6 +120,19 @@ def smoke_test(path: Path) -> None:
                                    for i in range(120)])
     if len(labels) != 120:
         raise SystemExit(f"cluster_texts returned {len(labels)} labels for 120 texts")
+    # Exercise the scalable branch without making every build process an
+    # actual 8K-document benchmark. It exists specifically for the current
+    # public 50K maximum and must not become an untested fallback.
+    threshold = module.CONFIG["large_batch_threshold"]
+    module.CONFIG["large_batch_threshold"] = 10
+    try:
+        large_labels = module.cluster_texts(
+            [f"social post about topic {i % 11} and event {i % 23}"
+             for i in range(240)])
+    finally:
+        module.CONFIG["large_batch_threshold"] = threshold
+    if len(large_labels) != 240:
+        raise SystemExit("large-batch path returned the wrong label count")
     if module.DISTILLED_BLOB and module.load_distilled() is None:
         raise SystemExit("the baked blob does not decode in the minified build")
 

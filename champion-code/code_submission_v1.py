@@ -8,14 +8,17 @@ partition and then bend it toward the metric.
 
 Two facts leak out of the platform's own reporting and drive the whole design:
 
-1. Every subset's ground truth has a minimum cluster size of 25-27, which pins
-   HDBSCAN's `min_cluster_size` at 25. Ground truth never contains a cluster
-   smaller than that, and lands at 34-44 clusters on 5000 texts.
+1. In the observed platform rounds, every subset's ground truth has a minimum
+   cluster size of 25-27, which pins HDBSCAN's `min_cluster_size` at 25.
+   Ground truth never contains a cluster smaller than that, and lands at 34-44
+   clusters on 5000 texts.
 2. Ground truth marks 13-29% of points as noise under a single shared label
    (-1), not as singletons.
 
 So the target output shape is roughly 40 clusters of at least 25 members each,
-plus one large noise group. This submission aims directly at that shape.
+plus one large noise group for the observed 5K batches. The public miner
+specification also allows batches up to 50K, so those route to a separate
+bounded-memory approximation instead of attempting quadratic neighbour work.
 
 Pipeline
     clean -> route by domain (social vs. titles)
@@ -26,6 +29,10 @@ Pipeline
           -> HDBSCAN(min_cluster_size=25), or an agglomerative cut chosen by
              kNN-graph modularity
           -> merge foreign-script clusters, enforce the size floor, assign noise
+
+    n > 8000 -> hashed lexical + distilled features
+             -> MiniBatchKMeans with the official baseline's adaptive k
+             -> singleton the least-supported 20%
 
 Everything is gated on a wall-clock deadline and every stage has a fallback, so
 the server degrades rather than failing: the 90-second budget is a hard limit.
@@ -74,6 +81,17 @@ sklearn.set_config(working_memory=128)
 CONFIG: dict[str, object] = {
     # Wall clock. The hard limit is 90s; leave room for FastAPI and JSON.
     "time_budget": 74.0,
+
+    # The current miner-facing specification allows 1K-50K texts. The
+    # manifold path is tuned for the 5K batches observed in platform metadata
+    # and contains exact cosine kNN plus an O(n^2) linkage fallback; neither is
+    # safe near 50K. Above this boundary use the scalable path below: hashed
+    # lexical features + the distilled map + MiniBatchKMeans. The threshold is
+    # deliberately above every observed platform batch, so normal rounds keep
+    # the higher-scoring path while documented large rounds cannot time out.
+    "large_batch_threshold": 8000,
+    "large_batch_max_clusters": 100,
+    "large_batch_noise_frac": 0.20,
 
     # What the ground-truth pipeline does, read off the platform's own metadata:
     # no ground-truth cluster in any subset has fewer than 25 members.
@@ -1263,6 +1281,57 @@ def fallback_labels(docs: list[str]) -> np.ndarray:
         return np.zeros(len(docs), np.int64)
 
 
+def cluster_large_batch(docs: list[str]) -> np.ndarray:
+    """Bounded-memory path for the documented maximum of 50K texts.
+
+    The regular path repeatedly performs exact dense cosine-neighbour search.
+    At 50K that means billions of pair comparisons, and if HDBSCAN rejects the
+    result its scipy-linkage fallback also allocates the condensed O(n^2)
+    distance matrix. A weak result returned on time beats a killed request.
+
+    This follows the current official baseline's scalable shape
+    (sqrt(n/2), capped at 100 clusters), but replaces TF-IDF with a fixed-width
+    hashed lexical block and the offline distilled teacher map. MiniBatchKMeans
+    consumes the sparse matrix directly. Its least-supported points become
+    singletons, matching the safer noise representation used by the measured
+    5K path without creating a quadratic-size false noise bucket.
+    """
+    try:
+        from sklearn.feature_extraction.text import HashingVectorizer
+
+        lexical = HashingVectorizer(
+            n_features=32768, ngram_range=(1, 2), analyzer="word",
+            stop_words="english", alternate_sign=False, norm=None,
+            dtype=np.float32).transform(docs)
+        lexical.data = np.log1p(lexical.data).astype(np.float32)
+        lexical = normalize(lexical)
+
+        teacher = distilled_features(docs)
+        features = lexical
+        if teacher is not None:
+            features = sparse_hstack(
+                [lexical, csr_matrix(teacher * 2.0)], format="csr")
+
+        n = len(docs)
+        k = max(2, min(int(np.sqrt(n / 2.0)),
+                       int(CONFIG["large_batch_max_clusters"])))
+        model = MiniBatchKMeans(
+            k, random_state=_RNG_SEED, n_init=3, batch_size=2048,
+            max_iter=100, max_no_improvement=10)
+        labels = model.fit_predict(features).astype(np.int64)
+
+        noise = int(n * float(CONFIG["large_batch_noise_frac"]))
+        if noise > 0:
+            # n*k is at most 5M floats under the documented limits, unlike the
+            # n*n graph the regular path would construct.
+            support = model.transform(features).min(axis=1)
+            pick = np.argpartition(-support, noise - 1)[:noise]
+            labels[pick] = np.arange(k, k + noise)
+        return labels
+    except Exception:  # noqa: BLE001
+        return fallback_labels(docs)
+
+
 def expand(labels: np.ndarray, empty_mask: list[bool]) -> list[int]:
     out: list[int] = []
     pos = 0
@@ -1296,6 +1365,12 @@ def cluster_texts(texts: list[str]) -> list[int]:
     try:
         n = len(docs)
         is_titles, _ = detect_titles(texts, docs)
+
+        if n > int(CONFIG["large_batch_threshold"]):
+            labels = cluster_large_batch(docs)
+            if bool(CONFIG["dedup_near_duplicates"]):
+                labels = force_duplicates_together(labels, docs)
+            return expand(compact(labels), empty_mask)
 
         Z = build_features(docs, is_titles, clock)
         if Z is None:
