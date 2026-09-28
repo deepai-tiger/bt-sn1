@@ -50,6 +50,35 @@ uv pip install --python /tmp/gtvenv/bin/python \
     sentence-transformers umap-learn scikit-learn "numpy<2.4" pyarrow
 ```
 
+## Re-audit of the current public Apex source
+
+Checked again against `macrocosm-os/apex` main at
+`dbb3831c13a6d21762256522bcbf2cab9d9b1e5f` (release v4.4.10,
+2026-09-25). The public text-clustering directory now exposes only the
+miner-facing README, baseline, Dockerfile and requirements. It does **not**
+contain the ground-truth implementation, model name, UMAP settings or HDBSCAN
+settings; the Dockerfile explicitly says that backend/common ground-truth
+source must not leak into the miner image. So no validator parameter can
+honestly be inferred from that directory beyond the reported
+`embedding -> UMAP -> HDBSCAN` shape.
+
+The README says three X/Reddit subsets and 1K-50K texts. The “three social
+subsets” text is byte-for-byte unchanged from the July v4.2.16 release and is
+contradicted by the newer round-54 metadata in this repository, which records
+four actual validator calls and the key
+`round_0054_subset_arxiv_41736d52.parquet`. Therefore the title route stays:
+removing it because of stale public prose would discard the only direct
+evidence about what the validator actually sends.
+
+The 50K maximum is still an actionable runtime contract. The regular scoring
+path performs repeated exact dense cosine kNN work and retains an O(n^2)
+scipy-linkage fallback, so it cannot safely scale there. Batches above 8K now
+use hashed word 1-2 grams plus the distilled map and MiniBatchKMeans, with the
+same `sqrt(n/2)` cluster heuristic (capped at 100) used by the current official
+baseline. On the documented maximum under the exact public dependency
+versions it returns 50,000 labels in **11.6s** at **267 MiB** peak RSS. The
+measured 5K path and all its scoring decisions are unchanged.
+
 ## Usage
 
 ```bash
