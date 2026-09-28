@@ -62,22 +62,93 @@ source must not leak into the miner image. So no validator parameter can
 honestly be inferred from that directory beyond the reported
 `embedding -> UMAP -> HDBSCAN` shape.
 
-The README says three X/Reddit subsets and 1K-50K texts. The “three social
-subsets” text is byte-for-byte unchanged from the July v4.2.16 release and is
-contradicted by the newer round-54 metadata in this repository, which records
-four actual validator calls and the key
-`round_0054_subset_arxiv_41736d52.parquet`. Therefore the title route stays:
-removing it because of stale public prose would discard the only direct
-evidence about what the validator actually sends.
+The README says three X/Reddit subsets and 1K-50K texts. That text is
+unchanged since July, and round 54's metadata records four calls including
+`subset_arxiv`, so it did not describe round 54. But the validator's job model
+(`shared/common/src/common/models/api/job.py`) sizes round generation for "a
+3-subset bake" (mpnet + UMAP + HDBSCAN), so the platform may since have moved
+to what the README describes. Neither source settles which rounds are live
+now; the title route stays because it costs nothing when titles never arrive.
 
-The 50K maximum is still an actionable runtime contract. The regular scoring
+The 50K maximum is an actionable runtime contract either way. The regular
 path performs repeated exact dense cosine kNN work and retains an O(n^2)
-scipy-linkage fallback, so it cannot safely scale there. Batches above 8K now
-use hashed word 1-2 grams plus the distilled map and MiniBatchKMeans, with the
-same `sqrt(n/2)` cluster heuristic (capped at 100) used by the current official
-baseline. On the documented maximum under the exact public dependency
-versions it returns 50,000 labels in **11.6s** at **267 MiB** peak RSS. The
-measured 5K path and all its scoring decisions are unchanged.
+scipy-linkage fallback, so it cannot scale there unguarded. See below for
+where the handoff now sits and what runs past it.
+
+## What the 0.4311 submission says, and what the rebuilt replica found
+
+The first submission with the large-batch branch scored **0.4311**, up from
+0.311-0.345. The branch only runs above 8K texts, so the jump invites the
+reading that the platform now sends large batches. The replica rules that out
+as the main cause: the branch as shipped scores 0.2586 / 0.2509 on 15K replica
+rounds, far below 0.43, while the regular path scores 0.3543 on 5K replica
+rounds. The reference champion (0.4052 on the platform in round 52) scores
+0.3457 here. Both land ~0.06-0.08 below their platform scores, so the
+replica is uniformly pessimistic and the 0.4311 came from the regular 5K
+path, on round data it suits better than rounds 54-55 did.
+
+The replica had to be rebuilt (the VM was recycled): 30K tweets + 7K Reddit
+posts encoded with mpnet, 12 social subsets at 5K. It matches the platform on
+cluster count (37-52 vs 34-49), median size (57-86 vs 53-75) and largest
+cluster (217-807 vs 231-907), but runs noisier: 23-30% against 13-22%,
+because random `twitter100m` tweets are less topical than Gravity's keyword
+crawls. A second bake with HDBSCAN `min_samples` 12 reaches 19.7-32%.
+
+**The champions' output shape does not transfer.** Every top submission on
+record emits ~26 real clusters plus a *fixed* share of singletons (20% or 25%
+on social, 40% on titles), where we singleton HDBSCAN's ~43% rejects:
+
+| submission | real clusters | singletons, social | singletons, arXiv |
+|---|---|---|---|
+| round 52 (0.4052) | ~26 | 1,000 = 20% | 2,000 = 40% |
+| round 53 (0.4117) | ~26 | 1,000 = 20% | 2,000 = 40% |
+| round 54 (0.4467) | ~26 | 1,250 = 25% | 2,000 = 40% |
+
+So two ways of spending fewer singletons were measured against ours, on both
+5K replicas (24 subsets): a fixed quota (reclaim every reject, then singleton
+the least-supported 20/25/30%) and a unanimous-neighbour vote that reclaims
+only rejects whose 10 nearest clustered points agree. Both lose:
+
+| | first replica | low-noise replica |
+|---|---|---|
+| singleton every reject (shipped) | **0.3543** | **0.3614** |
+| quota 20% / 25% / 30% | 0.3519 / 0.3552 / -- | 0.3546 / 0.3584 / 0.3611 |
+| vote, 100% agreement of 10 | 0.3470 | 0.3511 |
+
+Reclaiming raises ARI a little (0.134 -> 0.147 for the vote) and costs more
+NMI (0.575 -> 0.547). Fitting quota-minus-singleton against each subset's
+true noise share predicts -0.004 at the platform's 18%, so lower noise does
+not rescue it either. Both modes were removed from the submission.
+
+HDBSCAN granularity is flat too: extra 5/10% ejections, `min_cluster_size`
+20/30 and `min_samples` 10/20 all land within +/-0.003 of the shipped config
+on both replicas. The 5K path sits at a local optimum of every knob tried;
+the gap to the leader needs a structurally different core, not tuning.
+
+**Large batches.** At 15K, UMAP + HDBSCAN bakes ~100 clusters of median ~60
+whether the topic count is scaled with n (129) or held fixed (43), so the
+ground truth's cluster count grows roughly as n/150 regardless of how the
+crawl grows. On those rounds the regular path beats every large-batch variant
+by a wide margin:
+
+| | 15K, topics scaled | 15K, topics fixed |
+|---|---|---|
+| regular path (HDBSCAN) | **0.3585** | **0.3475** |
+| large branch as shipped (hashed TF, teacher x2) | 0.2586 | 0.2509 |
+| large branch, BM25 + SVD, teacher x1, 2 smoothing passes | 0.2959 | 0.2825 |
+
+The regular path costs 20.7s at 12K and 25.4s at 15K here (HDBSCAN 9.0s and
+the LSA block 8.4s dominate; exact-kNN smoothing is only 1.5s), 29.2s and
+632 MiB at 16K under load, and past submissions put the platform at ~2x this
+VM. So the handoff moved from 8K to **16K**, and past it the large branch now
+runs the improved variant: 12.7s at 25K with smoothing, 14.0s at 50K without.
+
+**Next step: the real texts.** The replica's remaining error is that its texts
+are not the platform's. `get_previous_round_input_files.py` (Apex repo; needs a
+linked hotkey) lists the platform's own round input files, and
+`harness/import_rounds.py` turns downloaded parquet files into scored rounds --
+using their labels if present, otherwise baking ground truth with the
+platform's recipe. That removes the noise-share mismatch outright.
 
 ## Usage
 
@@ -336,6 +407,7 @@ Two lessons worth keeping in mind, since both bugs came from the same place:
 ## Files
 
 | `quant_ab.py` | fidelity per *character* for PQ vs per-dimension codes |
+| `import_rounds.py` | platform round-input parquet -> scored rounds (bakes labels if absent) |
 
 | file | role |
 |---|---|
