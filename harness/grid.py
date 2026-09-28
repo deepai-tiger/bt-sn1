@@ -58,8 +58,11 @@ def run(module, rounds: list[dict], overrides: dict) -> dict:
         for payload in rounds:
             started = time.perf_counter()
             pred = module.cluster_texts(list(payload["texts"]))
-            rows.append({"seconds": time.perf_counter() - started,
-                         **score_subset(payload["labels"], pred),
+            truth = payload["labels"]
+            rows.append({"name": payload.get("name", ""),
+                         "gt_noise": sum(1 for t in truth if t < 0) / len(truth),
+                         "seconds": time.perf_counter() - started,
+                         **score_subset(truth, pred),
                          **pred_stats(pred)})
     finally:
         module.CONFIG.clear()
@@ -72,6 +75,7 @@ def run(module, rounds: list[dict], overrides: dict) -> dict:
         "max_seconds": max(r["seconds"] for r in rows),
         "clusters": sum(r["num_clusters"] for r in rows) / n,
         "size_median": sum(r["size_median"] for r in rows) / n,
+        "rows": rows,
     }
 
 

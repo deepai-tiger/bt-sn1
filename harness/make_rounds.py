@@ -319,6 +319,19 @@ def main() -> None:
     parser.add_argument("--draws", type=int, default=3)
     parser.add_argument("--max-attempts", type=int, default=4)
     parser.add_argument("--min-samples", type=int, default=None)
+    # The current README describes three X/Reddit subsets and 1K-50K texts,
+    # and the validator's job model sizes its bake for "a 3-subset bake", so
+    # the arXiv subset is optional rather than assumed.
+    parser.add_argument("--subsets", type=str, default="1,2,3,arxiv")
+    # Baking override for the topic count. At sizes other than 5K there is no
+    # platform observation to calibrate against, so large rounds are baked
+    # under both readings of how a bigger crawl grows: more topics at the
+    # same size (scale this with n) or the same topics, larger (leave it).
+    parser.add_argument("--bake-n-topics", type=int, default=None)
+    # SHAPE was calibrated on a 40K Reddit + 60K tweet pool; a pool with a
+    # different mix needs its own spread and tail (see --calibrate).
+    parser.add_argument("--bake-spread", type=float, default=None)
+    parser.add_argument("--bake-tail", type=float, default=None)
     args = parser.parse_args()
 
     if args.calibrate:
@@ -329,7 +342,30 @@ def main() -> None:
         return
 
     args.out.mkdir(parents=True, exist_ok=True)
-    pools = {kind: load_pool(names) for kind, names in SOURCES.items()}
+    subsets: list[int | str] = [s if s == "arxiv" else int(s)
+                                for s in args.subsets.split(",") if s]
+    kinds = {"arxiv" if s == "arxiv" else "social" for s in subsets}
+    pools = {kind: load_pool(SOURCES[kind]) for kind in kinds}
+    shapes = {kind: dict(SHAPE[kind]) for kind in kinds}
+    for shape in shapes.values():
+        if args.bake_n_topics:
+            shape["n_topics"] = args.bake_n_topics
+        if args.bake_spread is not None:
+            shape["spread"] = args.bake_spread
+        if args.bake_tail is not None:
+            shape["tail_frac"] = args.bake_tail
+        # A pool noisier than the platform's crawl cannot reach its 13-22%
+        # noise through slice shape alone; this trades a little cluster
+        # granularity for the right noise share, which is the property the
+        # noise-shape decision actually depends on.
+        if args.min_samples is not None:
+            shape["min_samples"] = args.min_samples
+    # The envelope is the spread of the platform's 5K subsets; at other sizes
+    # the count-like bounds scale with n and the noise bound does not.
+    scale = args.size / SAMPLE_SIZE
+    envelope = {"size_max": ENVELOPE["size_max"] * scale,
+                "clusters_min": ENVELOPE["clusters_min"] * min(1.0, scale),
+                "noise_max": ENVELOPE["noise_max"]}
 
     for round_index in range(args.start_round, args.start_round + args.rounds):
         # Disjoint within a round, independent across rounds -- which is both
@@ -340,7 +376,7 @@ def main() -> None:
         # to 2-8 clusters with 4400 of 5000 points in one.
         taken = {kind: np.zeros(len(texts), bool)
                  for kind, (texts, _) in pools.items()}
-        for subset in (1, 2, 3, "arxiv"):
+        for subset in subsets:
             name = f"round_{round_index:04d}_subset_{subset}"
             path = args.out / f"{name}.json"
             if path.exists():
@@ -361,13 +397,13 @@ def main() -> None:
                                     + attempt * 7777)
                 trial = np.zeros_like(taken[kind]) | taken[kind]
                 indices, topics = build_subset(pool_texts, pool_emb, args.size,
-                                               SHAPE[kind], rng, trial)
+                                               shapes[kind], rng, trial)
                 labels = ground_truth(pool_emb[indices], args.seed,
-                                      SHAPE[kind]["min_samples"])
+                                      shapes[kind]["min_samples"])
                 info = describe(labels)
-                inside = (info["cluster_size_max"] <= ENVELOPE["size_max"]
-                          and info["num_clusters"] >= ENVELOPE["clusters_min"]
-                          and info["noise_frac"] <= ENVELOPE["noise_max"])
+                inside = (info["cluster_size_max"] <= envelope["size_max"]
+                          and info["num_clusters"] >= envelope["clusters_min"]
+                          and info["noise_frac"] <= envelope["noise_max"])
                 if inside or attempt >= args.max_attempts:
                     taken[kind] = trial
                     break
