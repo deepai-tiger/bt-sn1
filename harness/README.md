@@ -150,6 +150,92 @@ linked hotkey) lists the platform's own round input files, and
 using their labels if present, otherwise baking ground truth with the
 platform's recipe. That removes the noise-share mismatch outright.
 
+## Round 66: the winner's predictions on our texts, and a replica that agrees
+
+`get_previous_round_input_files.py -c 10` now answers "Previous round input
+files not available for this competition", so the texts are out of reach.
+What round 66 did hand over is both submissions' predictions on the same
+5000-text subsets (`champion-code/round-66/{our,top}/`), with their scores:
+
+| subset | ground truth | ours (ARI / NMI) | winner (ARI / NMI) |
+|---|---|---|---|
+| social 1 | 39 clusters, 13.2% noise, max 510 | 0.4656 (0.287 / 0.644) | 0.5207 (0.382 / 0.660) |
+| social 2 | 38 clusters, 13.1% noise, max 421 | 0.4183 (0.230 / 0.607) | 0.4650 (0.302 / 0.628) |
+| social 3 | 36 clusters, 12.0% noise, max 584 | 0.5367 (0.416 / 0.657) | 0.5716 (0.477 / 0.666) |
+| arXiv | 45 clusters, 28.9% noise, max 432 | 0.3039 (0.107 / 0.500) | 0.3369 (0.149 / 0.525) |
+| mean | | **0.4311** | **0.4735** |
+
+Output shape, from the prediction files (subset 1 of ours was not exported):
+
+| subset | ours: clusters / singletons / largest | winner |
+|---|---|---|
+| social 2 | 26 / 31.2% / 907 | 25 / 25.0% / 592 |
+| social 3 | 31 / 38.8% / 461 | 24 / 25.0% / 464 |
+| arXiv | 14 / 44.6% / 951 | 30 / 30.0% / 569 |
+
+Where both submissions cluster a point, the partitions largely agree (ARI
+0.645 / 0.785 on social 2 / 3), so on social the winner's edge is mostly
+which points it refuses to place: it singletons a fixed 25% where we
+singleton HDBSCAN's 31-39% rejects, against ground truth that holds only
+12-13% noise. Our largest social-2 cluster (907) spans six of the winner's
+clusters at 0.40 purity; on arXiv our 951-point cluster spans 25 at 0.22.
+
+The winner itself (`top/code_submission_v0.py`, blobs cropped by the CLI's
+panel) runs: TF-IDF/LSA + PPMI + a 48-dim hashed teacher, one smoothing
+pass, spectral coordinates appended, then for mid-length posts an
+average-linkage cut at 28 clusters and the 25% farthest from their kNN
+neighbours as singletons; titles get a separate 24-dim teacher at weight 3,
+a 100-cluster cut and 30% singletons. `reference_champion_r66.py`
+reconstructs it with our blob standing in for its teachers.
+
+**Why the replicas missed this.** The subreddit replicas rank our submission
+above the reconstruction (0.4219 against 0.3704), the opposite of the
+platform, and there quota singletons are worth nothing. Their ground truth
+holds 18-27% noise and our pipeline rejects 42-53% of it. A replica built
+from keyword crawls (`sn13_keywords.py`: SN13 Reddit/X posts that mention
+exactly one of ~110 keywords, 75 keywords kept, 21.6K texts) behaves like
+the platform once its noise is low. Mixing 20-50 keywords per subset gives
+8-39 clusters and 0-33% noise (36 subsets, `/tmp/kw_{a,b,c,d}`), and
+below 14% noise it emits our platform shape -- 37% singletons, 26 clusters
+-- and ranks the reconstruction above us by 0.030, as the platform did:
+
+| ground-truth noise | subsets | shipped | quota 25% | quota 15% | quota 10% | reclaim all | r66 reconstruction | **new** |
+|---|---|---|---|---|---|---|---|---|
+| < 14% | 10 | 0.4371 | 0.4583 | 0.4760 | 0.4819 | 0.4845 | 0.4673 | **0.4885** |
+| 14-19% | 5 | 0.4468 | 0.4647 | 0.4719 | 0.4725 | 0.4721 | 0.4528 | |
+| 19-24% | 11 | 0.4033 | 0.4158 | 0.4210 | 0.4217 | 0.4173 | 0.4043 | |
+| > 24% | 10 | 0.3522 | 0.3606 | 0.3643 | 0.3659 | 0.3629 | 0.3402 | |
+| all | 36 | 0.4045 | 0.4191 | 0.4276 | 0.4300 | 0.4284 | 0.4107 | **0.4316** |
+
+"New" is what ships now: quota 10%, rejects ranked by kNN distance plus
+distance to their own centroid, and HDBSCAN `min_samples` 25 on social (the
+last two are worth +0.007 below 14% noise and nothing overall). It beats the
+old submission on 34 of 36 subsets and the reconstruction on 28. The
+subreddit replica still prefers singletons (0.4219 against 0.4037), and
+that is the known risk of this change.
+
+Left alone, because the evidence does not support moving them:
+
+* **arXiv.** The arXiv replica reproduces our platform shape (14-19 clusters,
+  38-58% singletons, largest 556-1307), and there every quota loses (0.2698
+  singletons, 0.2614 / 0.2562 / 0.2481 at 40 / 30 / 20%), as do 16 or 24
+  spectral dimensions (0.2641 / 0.2565). The reconstruction also loses
+  (0.2549), so the winner's arXiv edge most likely lives in its title blob,
+  which the export cropped.
+* **Capping cluster size.** Replacing any cluster above 10% of n with what
+  EOM selects inside its subtree (sklearn's `max_cluster_size`) costs 0.003
+  on the keyword rounds and 0.003 on arXiv, so it was not kept.
+
+Runtime: quota ranking adds one exact kNN pass, +2.6s at 15K (31.4s here,
+~57s at the platform's measured 1.8x). Past 85% of the budget it falls back
+to centroid distance alone.
+
+**Round 67** (open until 2026-09-29 22:14 KST): the leader is 5Gj88bkr at
+0.4547, so a new submission must reach **0.4592**. The winner's full code,
+blobs included, can be fetched raw with `harness/fetch_submission.py
+--submission-id 180909` from an Apex checkout with a linked hotkey; the CLI's
+`apex result -f` export crops every line at the console width.
+
 ## Usage
 
 ```bash
@@ -434,6 +520,12 @@ Two lessons worth keeping in mind, since both bugs came from the same place:
 | `test_blob.py` | round-trips the packer against the submission's unpacker |
 | `minify.py` | builds the submission-sized copy and checks the character limit |
 | `reference_champion.py` | readable reconstruction of the 4th-place submission, used as the A/B baseline |
+| `reference_champion_r66.py` | reconstruction of the round-66 winner, our blob standing in for its teachers |
+| `par_eval.py` | scores a module over a rounds directory in parallel; `--variant` sweeps `CONFIG` or module constants |
+| `sn13_pool.py` | builds and mpnet-encodes a pool of SN13 Reddit/X posts grouped by subreddit or topic |
+| `sn13_keywords.py` | builds a keyword-crawl pool: posts that mention exactly one keyword |
+| `sn13_rounds.py` | mixes pool communities into 5K subsets and bakes their ground truth |
+| `fetch_submission.py` | downloads a submission's raw code, eval files and metadata (no console cropping) |
 
 ## Where the ceiling is
 
