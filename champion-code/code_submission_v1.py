@@ -121,11 +121,13 @@ CONFIG: dict[str, object] = {
     "cluster_mode": "hdbscan",
 
     # HDBSCAN specifics. `min_samples` = None reproduces the ground truth's
-    # configuration (scikit-learn defaults it to min_cluster_size), but a
-    # slightly smaller value measures better: our features are noisier than
-    # sentence embeddings, so demanding 25 neighbours within the core distance
-    # rejects points the ground truth keeps.
-    "hdbscan_min_samples": 15,
+    # configuration (scikit-learn defaults it to min_cluster_size). 15 won
+    # while rejects were emitted as singletons, because demanding 25
+    # neighbours rejects points the ground truth keeps. Under the "quota"
+    # noise mode every reject is reclaimed anyway, and 25 measures better on
+    # social (+0.004 on the low-noise keyword rounds); titles keep 15.
+    "hdbscan_min_samples": 25,
+    "title_hdbscan_min_samples": 15,
     "hdbscan_selection": "eom",       # "eom" | "leaf"
     "hdbscan_epsilon": 0.0,
 
@@ -176,13 +178,21 @@ CONFIG: dict[str, object] = {
     # "none"      - push rejects back into their nearest cluster
     # "graded"    - the most noise-like `noise_bucket_frac` share into one
     #               bucket, the remainder as singletons
+    # "quota"     - reclaim every reject, then make singletons of exactly
+    #               `noise_quota` of n, least supported first
     #
-    # Singletons win on social by +0.025 (0.4501 against 0.4248 reclaiming, 9
-    # subsets), and the whole gain is NMI: 0.5640 -> 0.6198 with ARI flat at
-    # 0.28. That profile is also what the top submissions report on the real
-    # rounds -- NMI 0.60-0.63 against ARI 0.27-0.32 -- which is the outside
-    # evidence that this is the right shape rather than a local artefact.
-    "noise_mode": "singleton",
+    # Singletons won on the subreddit replicas, whose ground truth holds
+    # 18-27% noise. Round 66 said otherwise: its social subsets held 12-13%,
+    # we emitted 31-39% singletons, and the winner's fixed 25% beat us on all
+    # three, almost entirely on ARI. A replica baked from keyword crawls
+    # reproduces that -- below 14% noise it emits our platform shape (37%
+    # singletons, 26 clusters) and ranks the winner's reconstruction above
+    # us, 0.4673 against 0.4371 -- and there a 10% quota scores 0.4885.
+    # Over all 36 keyword subsets it is +0.027 (34 wins) against singletons
+    # and +0.021 against the reconstruction. The subreddit replica still
+    # prefers singletons (-0.018), but it also ranks the reconstruction far
+    # below us, which the platform contradicts.
+    "noise_mode": "quota",
     # Extra points promoted to noise beyond the clusterer's own rejects, as a
     # fraction of n. The top submissions eject a large share by hand -- 25% on
     # social, 40% on titles -- because their agglomerative cut has no noise
@@ -193,6 +203,15 @@ CONFIG: dict[str, object] = {
     # Under "graded", the share of the noise set that goes to the shared bucket
     # instead of becoming singletons, taken most-noise-like first.
     "noise_bucket_frac": 0.5,
+    # Under "quota", the share of n that becomes singletons. The round-66
+    # winner uses 25%; on the keyword rounds 0.10 beats 0.15 and 0.25 by
+    # 0.002 and 0.011, and is within 0.003 of the best in every noise band
+    # from 10% to 30% (reclaiming everything wins below 14%, loses above).
+    "noise_quota": 0.10,
+    # Neighbour rank whose distance scores support under "quota", and whether
+    # the distance to the point's own centroid is added to it.
+    "noise_rank_k": 20,
+    "noise_rank_centroid": True,
 
     # Rejected points whose cosine to a real centroid clears this threshold are
     # reclaimed into that cluster instead of going to the bucket. 0 disables.
@@ -983,7 +1002,7 @@ def cluster_hdbscan(E: np.ndarray, min_cluster_size: int,
     n = E.shape[0]
     if n < min_cluster_size * 2:
         return None
-    min_samples = CONFIG["hdbscan_min_samples"]
+    min_samples = opt("hdbscan_min_samples", is_titles)
     epsilon = float(CONFIG["hdbscan_epsilon"])
     try:
         labels = HDBSCAN(
@@ -1156,15 +1175,22 @@ def merge_mutual_nn(labels: np.ndarray, Z: np.ndarray, thr: float = 0.85,
     return out
 
 
-def outlier_score(Z: np.ndarray, labels: np.ndarray, k: int = 12) -> np.ndarray:
-    """How poorly each point is supported: larger means more noise-like."""
+def outlier_score(Z: np.ndarray, labels: np.ndarray, k: int = 12,
+                  knn: bool = True) -> np.ndarray:
+    """How poorly each point is supported: larger means more noise-like.
+
+    `knn=False` skips the exact neighbour search, which is quadratic in n,
+    and scores by distance to the point's own centroid alone.
+    """
     n = Z.shape[0]
+    score = np.zeros(n, np.float32)
     try:
-        dist = NearestNeighbors(n_neighbors=min(k + 1, n - 1), metric="cosine") \
-            .fit(Z).kneighbors(Z)[0][:, 1:]
-        score = dist[:, -1].astype(np.float32)
+        if knn:
+            dist = NearestNeighbors(n_neighbors=min(k + 1, n - 1), metric="cosine") \
+                .fit(Z).kneighbors(Z)[0][:, 1:]
+            score = dist[:, -1].astype(np.float32)
     except Exception:  # noqa: BLE001
-        score = np.zeros(n, np.float32)
+        pass
     ids, centre = centroids_of(labels, Z)
     if ids.size:
         index = {int(i): p for p, i in enumerate(ids)}
@@ -1177,7 +1203,7 @@ def outlier_score(Z: np.ndarray, labels: np.ndarray, k: int = 12) -> np.ndarray:
 
 
 def assign_noise(labels: np.ndarray, Z: np.ndarray, sids: np.ndarray,
-                 is_titles: bool = False) -> np.ndarray:
+                 is_titles: bool = False, hurry: bool = False) -> np.ndarray:
     """Turn the clusterer's rejects (plus an optional extra slice) into the
     output's noise representation.
 
@@ -1211,6 +1237,31 @@ def assign_noise(labels: np.ndarray, Z: np.ndarray, sids: np.ndarray,
                 out[pick[score[pick] >= 0]] = NOISE_LABEL
 
     rejected = out == NOISE_LABEL
+    if mode == "quota":
+        ids, centre = centroids_of(out, Z)
+        if ids.size and rejected.any():
+            out[rejected] = ids[(Z[rejected] @ centre.T).argmax(1)]
+        out = compact(out)
+        count = int(out.size * float(opt("noise_quota", is_titles)))
+        if count <= 0:
+            return out
+        k = int(opt("noise_rank_k", is_titles))
+        if hurry or bool(opt("noise_rank_centroid", is_titles)):
+            score = outlier_score(Z, out, k, knn=not hurry)
+        else:
+            try:
+                score = NearestNeighbors(n_neighbors=min(k + 1, out.size - 1),
+                                         metric="cosine").fit(Z).kneighbors(Z)[0][:, -1]
+            except Exception:  # noqa: BLE001
+                score = outlier_score(Z, out, k)
+        score = np.asarray(score, np.float32)
+        score[sids > 0] = -1.0
+        count = min(count, int((score >= 0).sum()))
+        if count > 0:
+            pick = np.argpartition(-score, count - 1)[:count]
+            base = int(out.max()) + 1
+            out[pick] = np.arange(base, base + count)
+        return out
     if not rejected.any():
         return compact(out)
 
@@ -1450,7 +1501,8 @@ def cluster_texts(texts: list[str]) -> list[int]:
                                   str(CONFIG["small_cluster_mode"]))
         if bool(CONFIG["merge_mutual_nn"]) and not clock.used(0.95):
             labels = merge_mutual_nn(labels, embedding)
-        labels = assign_noise(labels, embedding, sids, is_titles)
+        labels = assign_noise(labels, embedding, sids, is_titles,
+                              clock.used(0.85))
         if bool(CONFIG["dedup_near_duplicates"]):
             labels = force_duplicates_together(labels, docs)
         labels = compact(labels)
