@@ -248,7 +248,10 @@ def describe(labels: np.ndarray) -> dict:
     }
 
 
-SOURCES = {"social": ["reddit", "tweets"], "arxiv": ["arxiv"]}
+# Pool names under SN1_TEACHER_DIR. The SN13 pool (`sn13_pool.py`) is used by
+# exporting it as one .npz and pointing SN1_SOCIAL_SOURCES at it.
+SOURCES = {"social": os.environ.get("SN1_SOCIAL_SOURCES", "reddit,tweets").split(","),
+           "arxiv": os.environ.get("SN1_ARXIV_SOURCES", "arxiv").split(",")}
 
 
 def shape_error(info: dict, target: dict) -> float:
@@ -332,6 +335,9 @@ def main() -> None:
     # different mix needs its own spread and tail (see --calibrate).
     parser.add_argument("--bake-spread", type=float, default=None)
     parser.add_argument("--bake-tail", type=float, default=None)
+    # Draw every subset from the whole pool. A small pool cannot supply three
+    # disjoint subsets without the later ones baking noticeably noisier.
+    parser.add_argument("--independent-subsets", action="store_true")
     args = parser.parse_args()
 
     if args.calibrate:
@@ -383,6 +389,8 @@ def main() -> None:
                 print(f"{name}: exists, skipping")
                 continue
             kind = "arxiv" if subset == "arxiv" else "social"
+            if args.independent_subsets:
+                taken[kind][:] = False
             pool_texts, pool_emb = pools[kind]
             # Shape knobs get the aggregate right but individual draws still
             # scatter, and the tail of that scatter is not harmless: a subset
