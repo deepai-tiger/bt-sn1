@@ -1,6 +1,6 @@
-Fetching submission 180342...
-Fetching code_submission_v2.py...
-╭──────────────────────────────────────────────────────────────────────────────────────────── code_submission_v2.py ────────────────────────────────────────────────────────────────────────────────────────────╮
+Fetching submission 180909...
+Fetching code_submission_v0.py...
+╭──────────────────────────────────────────────────────────────────────────────────────────── code_submission_v0.py ────────────────────────────────────────────────────────────────────────────────────────────╮
 │     1 k=isinstance                                                                                                                                                                                            │
 │     2 j=set                                                                                                                                                                                                   │
 │     3 i=enumerate                                                                                                                                                                                             │
@@ -31,7 +31,7 @@ Fetching code_submission_v2.py...
 │    28 import sklearn                                                                                                                                                                                          │
 │    29 sklearn.set_config(working_memory=128)                                                                                                                                                                  │
 │    30 AI=128                                                                                                                                                                                                  │
-│    31 AJ=10                                                                                                                                                                                                   │
+│    31 AJ=6                                                                                                                                                                                                    │
 │    32 AK=3                                                                                                                                                                                                    │
 │    33 AL=20000                                                                                                                                                                                                │
 │    34 AM=192                                                                                                                                                                                                  │
@@ -51,7 +51,7 @@ Fetching code_submission_v2.py...
 │    48 AX=.8                                                                                                                                                                                                   │
 │    49 AY=.08                                                                                                                                                                                                  │
 │    50 AZ=.03                                                                                                                                                                                                  │
-│    51 v,Aa=40,300                                                                                                                                                                                             │
+│    51 v,Aa=40,220                                                                                                                                                                                             │
 │    52 Ab=25                                                                                                                                                                                                   │
 │    53 w=.001                                                                                                                                                                                                  │
 │    54 Ac=1                                                                                                                                                                                                    │
@@ -67,7 +67,7 @@ Fetching code_submission_v2.py...
 │    64 r=70                                                                                                                                                                                                    │
 │    65 Aj=15000                                                                                                                                                                                                │
 │    66 A3=12                                                                                                                                                                                                   │
-│    67 Ak='첛겖奀一甶꣑娄両于一丂嫵鑧圌傪읝丕覇ꢥ糦뽈釫懙針ꢌ韂ꟙ좊墈괅帎쇴윾ꄡ獽峁榟민減贤괫迡뭮ꛠ嶯絔읩솧悲與攖쐌玓ꍓ珒嬙렾쬠쎣넖麷궑뾴毧戟쫖蹽疰打唴遨빂蚦잼鯜悅褈骼蟚襄ꘪ毸맚抔铊跃秠荚偘廨燯鉗漈际뀉뾉ꙅ惒愩蚷볒 │
+│    67 Ak='첛겖奀一甶꣑娄両于一丂嫵鑧圌墴坝一栣馻蛺뷠醚뻄뙩爜띋믶菹芵줦铃躬섌鸰窛륍缠这坃嗇朶渟苴뜣ꏥ샖弊꿸籣꤄瀔裣뚕墦恀橰먯ꭵ摪庩앟쮆杸碌抜룹쪺룘醷证虌欤鞮捙资姜斉劌癋甹冞씟륙ꮮ뵈湵댹潜嶸꣐濆蠈踒柰堃缵叕쨵읔ꥹ │
 │    68 S=None                                                                                                                                                                                                  │
 │    69 Al=E.compile('http\\S+|www\\S+|https\\S+')                                                                                                                                                              │
 │    70 Am=E.compile('@\\w+')                                                                                                                                                                                   │
@@ -210,14 +210,14 @@ Fetching code_submission_v2.py...
 │   207     return bytes(C)                                                                                                                                                                                     │
 │   208 Z=8e1                                                                                                                                                                                                   │
 │   209 A6,A7,BW=8192,4096,24                                                                                                                                                                                   │
-│   210 B3,B4=80,.4                                                                                                                                                                                             │
-│   211 B5,BX,BY=4.,.5,13e1                                                                                                                                                                                     │
+│   210 B3,B4=100,.3                                                                                                                                                                                            │
+│   211 B5,BX,BY=3.,.5,13e1                                                                                                                                                                                     │
 │   212 A8,B6,BZ=6000,4000,32                                                                                                                                                                                   │
 │   213 Ba,B7,Bb=.4,.6,0                                                                                                                                                                                        │
-│   214 A9,AA,Bc,Bd=.5,1.,1.,1.                                                                                                                                                                                 │
+│   214 A9,AA,Bc,Bd=1.,1.,1.,1.                                                                                                                                                                                 │
 │   215 B8=E.compile('[^\\w\\s]')                                                                                                                                                                               │
 │   216 B9,BA,BB,BC=.35,8000,.35,8000                                                                                                                                                                           │
-│   217 BD='丁婸凴보Ꙛ一伹꣖鉠币刄蘀一噧ꐳ樜暈꾨丁丅쥜侇ꈘꕘ烕墴畻붴ꗹ緉篙뫅롅꒪搞厤鍮礽鬩鬶喨뒐猡犸茔쫎坐茷蟉廝熥籥ꬷ蜲浇鞒ꀝ膗뻴甕髃짣弩芀姠딟抐秎ꎙ읰膎뚑刔댞儜챗搑芭闡錾誧經烚꺮釳鑯뾠溯膀揖衾罄魘璘숈芒賶쀢鼴싆 │
+│   217 BD='丁姈巓角꽨一仿坬鹀踄帑글一澞ꛌ빛ꐢ뾫鸁渓빣艮썂續瓤꥿꬞陡羥蓆缸ꨘ镱诠烍旆왚装맟獤嬮闃轎聿殔ꭤ蟑윯ꧺ鯮쏔荲싹젞舁薂ꛮ봻얙澘鸎廡齺決规膷젔긄当꠸輯璜脩꧅楠塨剗ꈬ颭樻傞잻騲꺞僯ꐭ싫撯傈쎯돐隿劋璼슡뿄劐妬ꯕ霿湒鰨  │
 │   218 a=E.compile('https?://\\S+|www\\.\\S+')                                                                                                                                                                 │
 │   219 BE=E.compile('^rt\\s+',E.IGNORECASE)                                                                                                                                                                    │
 │   220 d=E.compile('@\\w+')                                                                                                                                                                                    │
@@ -370,7 +370,7 @@ Fetching code_submission_v2.py...
 │   367             elif j:l=Ae                                                                                                                                                                                 │
 │   368             elif a<b:l=1                                                                                                                                                                                │
 │   369             else:l=3 if 230<AI<330 else A0                                                                                                                                                              │
-│   370             k=s(k,l);Y.append(C(k)*(1. if N else 1.4))                                                                                                                                                  │
+│   370             k=s(k,l);Y.append(C(k)*(1. if N else 1.))                                                                                                                                                   │
 │   371         if Z is not None:                                                                                                                                                                               │
 │   372             if j and z:Z=s(Z,z)                                                                                                                                                                         │
 │   373             AL=1. if N or j else AX if a<b else AW;Y.append(C(Z)*AL)                                                                                                                                    │
@@ -378,19 +378,19 @@ Fetching code_submission_v2.py...
 │   375         if AB is not None:Y.append(C(AB)*A9)                                                                                                                                                            │
 │   376         if not Y:return h(I,U,V)                                                                                                                                                                        │
 │   377         G=C(A.hstack(Y))if B(Y)>1 else Y[0]                                                                                                                                                             │
-│   378         if(not N or Ac)and P.perf_counter()-u<r*.45:G=Az(G,k=12 if 230<AI<330 else 12,alpha=.2 if 230<AI<330 else .1,iters=1)                                                                           │
+│   378         if(not N or Ac)and P.perf_counter()-u<r*.45:G=Az(G,k=12 if 230<AI<330 else 8,alpha=.2 if 230<AI<330 else .1,iters=1)                                                                            │
 │   379         if not N and P.perf_counter()-u<r*.55:                                                                                                                                                          │
 │   380             AM=(36 if j else 16 if a<b else y)if 230<AI<330 else(AT if j else AU if a<b else y);AC=A_(G,dim=AM)                                                                                         │
 │   381             if AC is not None:G=C(A.hstack([G,AC]))                                                                                                                                                     │
 │   382         if P.perf_counter()-u>r:return h(I,U,V)                                                                                                                                                         │
-│   383         AQ,AD=B0(G,k=16 if 230<AI<330 else A3);S,AE=(Ab,Ah)if N else B1(AQ);AR=J>A2                                                                                                                     │
+│   383         AQ,AD=B0(G,k=20 if 230<AI<330 else A3);S,AE=(Ab,Ah)if N else B1(AQ);AR=J>A2                                                                                                                     │
 │   384         if AR:                                                                                                                                                                                          │
 │   385             m=A.sort(A.random.default_rng(0).choice(J,A2,replace=False));S=D(S,B(m)-1);AS=o(p(G[m],'average','cosine'),S,'maxclust').astype(A.int64);Aa=Q(n_neighbors=D(5,B(m)),metric='cosine').fit(G[ │
 │   386             for n in K(0,J,5000):v,Ag=Aa.kneighbors(G[n:n+5000]);E[n:n+5000]=[A.bincount(B).argmax()for B in AS[Ag]]                                                                                    │
 │   387             i=AD[:,-1]                                                                                                                                                                                  │
 │   388         else:                                                                                                                                                                                           │
 │   389             _L=p(G,'average','cosine')                                                                                                                                                                  │
-│   390             if 230<AI<330:S,AE=28,0.2                                                                                                                                                                   │
+│   390             if 230<AI<330:S,AE=28,.25                                                                                                                                                                   │
 │   391             S=D(S,J-1);E=o(_L,S,'maxclust').astype(A.int64);i=AD[:,-1]                                                                                                                                  │
 │   392         e=A.fromiter((A4(A)for A in I),A.int16,J);E=A5(E,e)                                                                                                                                             │
 │   393         if N:                                                                                                                                                                                           │
